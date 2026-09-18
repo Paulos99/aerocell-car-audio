@@ -1,4 +1,4 @@
-const CACHE = 'aerocell-v5';
+const CACHE = 'aerocell-v6';
 const SHELL = [
   './',
   './index.html',
@@ -9,7 +9,8 @@ const SHELL = [
   './icons/icon-maskable-192.png',
   './icons/icon-maskable-512.png',
   './icons/apple-touch-icon.png',
-  './icons/favicon.ico'
+  './icons/favicon.ico',
+  './icons/stp-logo.png'
 ];
 const AUDIO = [
   './audio/club.mp3',
@@ -89,9 +90,13 @@ self.addEventListener('fetch', (event) => {
 
     if (isAudio) {
       if (cached) {
-        return request.headers.has('range') ? respondWithRange(request, cached) : cached;
+        if (request.headers.has('range')) return respondWithRange(request, cached);
+        const headers = new Headers(cached.headers);
+        headers.set('Accept-Ranges', 'bytes');
+        headers.set('Content-Type', cached.headers.get('Content-Type') || 'audio/mpeg');
+        return new Response(cached.body, { status: 200, headers });
       }
-      const response = await fetch(url.href);
+      const response = await fetch(request);
       if (response.ok) {
         const cache = await caches.open(CACHE);
         cache.put(url.href, response.clone());
