@@ -1,5 +1,5 @@
-const CACHE = 'aerocell-v1';
-const PRECACHE = [
+const CACHE = 'aerocell-v2';
+const SHELL = [
   './',
   './index.html',
   './privacy.html',
@@ -9,18 +9,27 @@ const PRECACHE = [
   './icons/icon-maskable-192.png',
   './icons/icon-maskable-512.png',
   './icons/apple-touch-icon.png',
-  './icons/favicon.ico',
+  './icons/favicon.ico'
+];
+const AUDIO = [
   './audio/club.mp3',
   './audio/classical.mp3',
   './audio/rock.mp3'
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE)
-      .then((cache) => cache.addAll(PRECACHE))
-      .then(() => self.skipWaiting())
-  );
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    await cache.addAll(SHELL);
+    await Promise.all(AUDIO.map(async (url) => {
+      try {
+        await cache.add(url);
+      } catch (error) {
+        console.warn('audio precache skipped', url, error);
+      }
+    }));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (event) => {
