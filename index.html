@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="AEROCELL — стенд стерео-баланса с визуализацией и тремя предустановленными треками.">
+  <meta name="theme-color" content="#b71c1c">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AEROCELL">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>AEROCELL — Аудио баланс</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <style>
+    :root {
+      --primary: #e53935;
+      --primary-dark: #b71c1c;
+      --bg-dark: #0f0f0f;
+      --bg-medium: #1a1a1a;
+      --bg-light: #262626;
+      --text-main: #fff;
+      --text-secondary: rgba(255, 255, 255, 0.78);
+      --accent-glow: 0 0 15px rgba(229, 57, 53, 0.55);
+      --radius: 16px;
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      min-height: 100dvh;
+      background: linear-gradient(135deg, var(--bg-dark) 0%, #1a0d0d 100%);
+      font-family: "Segoe UI", Roboto, system-ui, sans-serif;
+      color: var(--text-main);
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: max(10px, var(--safe-top)) max(12px, var(--safe-right)) max(12px, var(--safe-bottom)) max(12px, var(--safe-left));
+    }
+
+    button, input, label { touch-action: manipulation; }
+
+    .particles {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+    }
+
+    .particle {
+      position: absolute;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--primary) 0%, transparent 70%);
+      opacity: 0.35;
+      animation: float 12s infinite linear;
+      filter: blur(1px);
+    }
+
+    @keyframes float {
+      0% { transform: translateY(100vh) translateX(0); opacity: 0; }
+      8% { opacity: 0.35; }
+      100% { transform: translateY(-20vh) translateX(calc(var(--x-end) * 1vw)); opacity: 0; }
+    }
+
+    .header, .container, .footer, .install-bar { position: relative; z-index: 1; }
+
+    .header {
+      text-align: center;
+      width: min(920px, 100%);
+      margin: 4px 0 12px;
+      flex-shrink: 0;
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: clamp(1.6rem, 6vw, 2.7rem);
+      font-weight: 900;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      text-shadow: 0 0 18px rgba(229, 57, 53, 0.8);
+    }
+
+    .header p {
+      margin: 6px auto 0;
+      max-width: 36rem;
+      color: var(--text-secondary);
+      font-weight: 300;
+      font-size: clamp(0.85rem, 2.4vw, 1rem);
+      line-height: 1.4;
+    }
+
+    .install-bar {
+      display: none;
+      width: min(920px, 100%);
+      margin-bottom: 10px;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      background: rgba(183, 28, 28, 0.28);
+      border: 1px solid rgba(229, 57, 53, 0.45);
+      border-radius: 12px;
+    }
+
+    .install-bar.visible { display: flex; }
+    .install-bar p { margin: 0; font-size: 0.9rem; }
+    .install-bar .actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      width: min(920px, 100%);
+      background: rgba(30, 30, 30, 0.55);
+      border-radius: 20px;
+      overflow: hidden;
+      border: 1px solid rgba(229, 57, 53, 0.3);
+      box-shadow: var(--accent-glow), 0 10px 30px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(10px);
+      flex: 1;
+      min-height: 0;
+    }
+
+    .visualizer-container {
+      height: clamp(110px, 22vw, 180px);
+      background: linear-gradient(to bottom, rgba(0,0,0,0.85), rgba(20,0,0,0.4));
+      border-bottom: 1px solid rgba(229, 57, 53, 0.3);
+      flex-shrink: 0;
+    }
+
+    #visualizer { width: 100%; height: 100%; display: block; }
+
+    .controls-section {
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .track-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .track-btn {
+      appearance: none;
+      border: 1px solid rgba(229, 57, 53, 0.35);
+      background: linear-gradient(180deg, rgba(50, 20, 20, 0.7), rgba(25, 25, 25, 0.85));
+      color: var(--text-main);
+      border-radius: 14px;
+      min-height: 72px;
+      padding: 10px 8px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .track-btn .icon { font-size: 1.25rem; line-height: 1; }
+    .track-btn .title { font-weight: 700; font-size: clamp(0.78rem, 2.8vw, 0.98rem); }
+    .track-btn .meta { font-size: 0.7rem; color: var(--text-secondary); }
+    .track-btn .status { font-size: 0.68rem; color: #8d8d8d; }
+
+    .track-btn.ready .status { color: #8bc34a; }
+    .track-btn.active {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(229, 57, 53, 0.35), 0 6px 16px rgba(0, 0, 0, 0.35);
+      background: linear-gradient(180deg, rgba(183, 28, 28, 0.55), rgba(40, 16, 16, 0.9));
+    }
+
+    .track-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+    .now-playing {
+      text-align: center;
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+      min-height: 1.2em;
+    }
+
+    .now-playing strong { color: #fff; }
+
+    .player-controls {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .player-btn, .ghost-btn, .install-bar button {
+      border: none;
+      border-radius: 12px;
+      min-height: 48px;
+      color: var(--text-main);
+      font-weight: 700;
+      cursor: pointer;
+      background: linear-gradient(to bottom, var(--bg-light), var(--bg-medium));
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+      font-size: 0.95rem;
+    }
+
+    .player-btn.primary { background: linear-gradient(180deg, #e53935, #b71c1c); }
+    .player-btn:disabled, .track-btn:disabled { opacity: 0.5; cursor: wait; }
+
+    .progress-row {
+      display: grid;
+      grid-template-columns: 42px 1fr 42px;
+      gap: 8px;
+      align-items: center;
+      font-variant-numeric: tabular-nums;
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 10px;
+      background: linear-gradient(90deg, #000, var(--primary));
+      border-radius: 8px;
+      outline: none;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #fff;
+      border: 2px solid var(--primary);
+      box-shadow: 0 0 12px rgba(229, 57, 53, 0.8);
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 24px;
+      height: 24px;
+      border: 2px solid var(--primary);
+      border-radius: 50%;
+      background: #fff;
+    }
+
+    .control-group {
+      background: linear-gradient(to bottom, rgba(40, 40, 40, 0.7), rgba(30, 30, 30, 0.7));
+      border-radius: 15px;
+      padding: 14px;
+      border: 1px solid rgba(229, 57, 53, 0.3);
+    }
+
+    .control-group h2, .control-group h3 {
+      margin: 0 0 12px;
+      text-align: center;
+      font-size: 1.05rem;
+      letter-spacing: 0.04em;
+      text-shadow: 0 0 5px rgba(229, 57, 53, 0.5);
+    }
+
+    .slider-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      font-weight: 500;
+    }
+
+    .channel-label {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--bg-light);
+      font-weight: 700;
+    }
+
+    .channel-label.active {
+      background: var(--primary);
+      transform: scale(1.12);
+      box-shadow: 0 0 15px rgba(229, 57, 53, 0.8);
+    }
+
+    .slider-value {
+      background: rgba(229, 57, 53, 0.25);
+      padding: 4px 12px;
+      border-radius: 10px;
+      min-width: 50px;
+      text-align: center;
+      font-weight: 600;
+    }
+
+    .file-upload-label {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      padding: 12px;
+      border: 2px dashed rgba(229, 57, 53, 0.4);
+      border-radius: 15px;
+      background: rgba(40, 40, 40, 0.45);
+      text-align: center;
+    }
+
+    .file-upload-label span { font-size: 0.92rem; font-weight: 600; }
+    .audio-info { font-size: 0.8rem; color: var(--text-secondary); font-weight: 400; }
+    #fileInput { display: none; }
+
+    .footer {
+      width: min(920px, 100%);
+      margin-top: 12px;
+      text-align: center;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      line-height: 1.45;
+    }
+
+    .footer a { color: #ff8a80; }
+
+    @media (min-width: 768px) {
+      .controls-section { padding: 20px; }
+      .track-btn { min-height: 92px; }
+      .app-grid {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 16px;
+        align-items: start;
+      }
+    }
+
+    @media (orientation: landscape) and (max-height: 500px) {
+      .header { margin-bottom: 6px; }
+      .header p { display: none; }
+      .visualizer-container { height: 96px; }
+      .track-btn { min-height: 56px; padding: 6px; }
+      .container { max-height: none; }
+    }
+
+    @media (max-width: 480px) {
+      .particle { display: none; }
+      .container { backdrop-filter: none; background: rgba(30, 30, 30, 0.86); }
+      .track-btn .meta { display: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .particle { animation: none; opacity: 0.15; }
+      * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="particles" id="particles" aria-hidden="true"></div>
+
+  <header class="header">
+    <h1>AEROCELL</h1>
+    <p>Стенд стерео-баланса: выберите жанр и сразу слушайте. Три трека уже внутри приложения.</p>
+  </header>
+
+  <div class="install-bar" id="installBar">
+    <p id="installText">Установить приложение на устройство</p>
+    <div class="actions">
+      <button type="button" id="installBtn">Установить</button>
+      <button type="button" class="ghost-btn" id="installDismiss" aria-label="Скрыть">Позже</button>
+    </div>
+  </div>
+
+  <main class="container">
+    <section class="visualizer-container" aria-label="Аудио визуализатор">
+      <canvas id="visualizer"></canvas>
+    </section>
+
+    <section class="controls-section">
+      <div class="track-grid" role="radiogroup" aria-label="Предустановленные треки">
+        <button class="track-btn active" type="button" role="radio" aria-checked="true" data-track="club" id="track-club">
+          <span class="icon" aria-hidden="true">🎧</span>
+          <span class="title">Клубная</span>
+          <span class="meta">Club Diver</span>
+          <span class="status" data-status>загрузка…</span>
+        </button>
+        <button class="track-btn" type="button" role="radio" aria-checked="false" data-track="classical" id="track-classical">
+          <span class="icon" aria-hidden="true">🎻</span>
+          <span class="title">Классика</span>
+          <span class="meta">Air Prelude</span>
+          <span class="status" data-status>загрузка…</span>
+        </button>
+        <button class="track-btn" type="button" role="radio" aria-checked="false" data-track="rock" id="track-rock">
+          <span class="icon" aria-hidden="true">🎸</span>
+          <span class="title">Рок</span>
+          <span class="meta">Iron Horse</span>
+          <span class="status" data-status>загрузка…</span>
+        </button>
+      </div>
+
+      <div class="now-playing" id="nowPlaying">Выбрано: <strong>Клубная</strong></div>
+
+      <div class="progress-row">
+        <span id="currentTime">0:00</span>
+        <input type="range" id="seekRange" min="0" max="1000" value="0" step="1" aria-label="Позиция трека">
+        <span id="durationTime">0:00</span>
+      </div>
+
+      <div class="player-controls">
+        <button class="player-btn primary" id="playBtn" type="button">PLAY</button>
+        <button class="player-btn" id="pauseBtn" type="button">PAUSE</button>
+        <button class="player-btn" id="stopBtn" type="button">STOP</button>
+      </div>
+
+      <div class="app-grid">
+        <div class="control-group">
+          <h2>Стерео баланс</h2>
+          <div class="slider-label">
+            <span class="channel-label" id="leftLabel">L</span>
+            <span class="slider-value" id="panValue">0.00</span>
+            <span class="channel-label" id="rightLabel">R</span>
+          </div>
+          <input type="range" min="-1" max="1" step="0.01" value="0" id="panRange" aria-label="Стерео баланс">
+        </div>
+
+        <div class="control-group">
+          <h3>Свой файл</h3>
+          <label class="file-upload-label" for="fileInput">
+            <span>Загрузить свой аудиофайл</span>
+            <span class="audio-info" id="audioInfo">необязательно, треки уже внутри</span>
+          </label>
+          <input type="file" id="fileInput" accept="audio/*">
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>AEROCELL CarAudio · предустановленные треки Kevin MacLeod (incompetech.com), CC BY 3.0</p>
+    <p><a href="privacy.html">Конфиденциальность</a> · <a href="https://creativecommons.org/licenses/by/3.0/">лицензия музыки</a></p>
+  </footer>
+
+  <script>
+    const TRACKS = {
+      club: { id: 'club', title: 'Клубная', src: 'audio/club.mp3', credit: 'Club Diver — Kevin MacLeod' },
+      classical: { id: 'classical', title: 'Классика', src: 'audio/classical.mp3', credit: 'Air Prelude — Kevin MacLeod' },
+      rock: { id: 'rock', title: 'Рок', src: 'audio/rock.mp3', credit: 'Iron Horse — Kevin MacLeod' }
+    };
+
+    const visualizer = document.getElementById('visualizer');
+    const canvasCtx = visualizer.getContext('2d');
+    const panRange = document.getElementById('panRange');
+    const panValue = document.getElementById('panValue');
+    const playBtn = document.getElementById('playBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const seekRange = document.getElementById('seekRange');
+    const currentTimeEl = document.getElementById('currentTime');
+    const durationTimeEl = document.getElementById('durationTime');
+    const nowPlaying = document.getElementById('nowPlaying');
+    const audioInfo = document.getElementById('audioInfo');
+    const leftLabel = document.getElementById('leftLabel');
+    const rightLabel = document.getElementById('rightLabel');
+    const particlesContainer = document.getElementById('particles');
+    const installBar = document.getElementById('installBar');
+    const installBtn = document.getElementById('installBtn');
+    const installDismiss = document.getElementById('installDismiss');
+    const installText = document.getElementById('installText');
+
+    const isMobile = window.innerWidth < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const isLowEnd = navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 2;
+    const players = {};
+    let activeId = 'club';
+    let customPlayer = null;
+    let audioCtx, panNode, gainNode, analyser;
+    let isPlaying = false;
+    let animationId = null;
+    let seeking = false;
+    let deferredPrompt = null;
+    let unlocked = false;
+    const sources = new WeakMap();
+
+    const visualizerData = {
+      smoothedData: new Float32Array(0),
+      dotSize: isLowEnd ? 1 : isMobile ? 1.2 : 1.5
+    };
+
+    function currentPlayer() {
+      if (activeId === 'custom' && customPlayer) return customPlayer;
+      return players[activeId];
+    }
+
+    function formatTime(value) {
+      if (!Number.isFinite(value) || value < 0) return '0:00';
+      const minutes = Math.floor(value / 60);
+      const seconds = Math.floor(value % 60).toString().padStart(2, '0');
+      return `${minutes}:${seconds}`;
+    }
+
+    function setTrackStatus(id, text, ready) {
+      const btn = document.querySelector(`[data-track="${id}"]`);
+      if (!btn) return;
+      const status = btn.querySelector('[data-status]');
+      if (status) status.textContent = text;
+      btn.classList.toggle('ready', Boolean(ready));
+    }
+
+    function highlightTrack(id) {
+      document.querySelectorAll('.track-btn').forEach((btn) => {
+        const selected = btn.dataset.track === id;
+        btn.classList.toggle('active', selected);
+        btn.setAttribute('aria-checked', selected ? 'true' : 'false');
+      });
+    }
+
+    function updateNowPlaying() {
+      if (activeId === 'custom') {
+        nowPlaying.innerHTML = 'Выбрано: <strong>свой файл</strong>';
+        return;
+      }
+      const track = TRACKS[activeId];
+      nowPlaying.innerHTML = `Выбрано: <strong>${track.title}</strong> · ${track.credit}`;
+    }
+
+    function createPlayer(src, useCors = true) {
+      const audio = new Audio();
+      audio.preload = 'auto';
+      audio.playsInline = true;
+      if (useCors) audio.crossOrigin = 'anonymous';
+      audio.src = src;
+      bindPlayer(audio);
+      audio.load();
+      return audio;
+    }
+
+    function bindPlayer(audio) {
+      audio.addEventListener('timeupdate', () => {
+        if (audio !== currentPlayer() || seeking) return;
+        const duration = audio.duration || 0;
+        seekRange.max = '1000';
+        seekRange.value = duration ? String(Math.round((audio.currentTime / duration) * 1000)) : '0';
+        currentTimeEl.textContent = formatTime(audio.currentTime);
+        durationTimeEl.textContent = formatTime(duration);
+      });
+      audio.addEventListener('loadedmetadata', () => {
+        if (audio === currentPlayer()) durationTimeEl.textContent = formatTime(audio.duration);
+      });
+      audio.addEventListener('play', () => {
+        if (audio !== currentPlayer()) return;
+        isPlaying = true;
+        drawVisualizer();
+      });
+      audio.addEventListener('pause', () => {
+        if (audio !== currentPlayer()) return;
+        isPlaying = false;
+        if (animationId) cancelAnimationFrame(animationId);
+      });
+      audio.addEventListener('ended', () => {
+        if (audio !== currentPlayer()) return;
+        isPlaying = false;
+        if (animationId) cancelAnimationFrame(animationId);
+      });
+    }
+
+    async function warmupTrack(id) {
+      const track = TRACKS[id];
+      try {
+        const response = await fetch(track.src);
+        if (!response.ok) throw new Error('fetch failed');
+        const blob = await response.blob();
+        const audio = players[id];
+        if (audio.paused) {
+          audio.src = URL.createObjectURL(blob);
+          audio.load();
+        }
+        setTrackStatus(id, 'готово', true);
+      } catch (error) {
+        players[id].addEventListener('canplaythrough', () => setTrackStatus(id, 'готово', true), { once: true });
+        players[id].addEventListener('error', () => setTrackStatus(id, 'ошибка', false), { once: true });
+      }
+    }
+
+    function ensureGraph(audio) {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        gainNode = audioCtx.createGain();
+        panNode = audioCtx.createStereoPanner();
+        analyser = audioCtx.createAnalyser();
+        gainNode.gain.value = 0.7;
+        panNode.pan.value = parseFloat(panRange.value);
+        gainNode.connect(panNode);
+        panNode.connect(analyser);
+        analyser.connect(audioCtx.destination);
+        analyser.fftSize = isLowEnd ? 1024 : 2048;
+        analyser.smoothingTimeConstant = 0.8;
+        setupVisualizerBuffers();
+      }
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      if (!sources.has(audio)) {
+        const source = audioCtx.createMediaElementSource(audio);
+        source.connect(gainNode);
+        sources.set(audio, source);
+      }
+    }
+
+    async function unlockAudio() {
+      if (unlocked) return;
+      unlocked = true;
+      const audio = currentPlayer();
+      if (audio) ensureGraph(audio);
+      if (audioCtx && audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+    }
+
+    async function selectTrack(id, autoplay) {
+      const previous = currentPlayer();
+      const wasPlaying = previous && !previous.paused;
+      if (previous && previous !== players[id] && !(id === 'custom' && previous === customPlayer)) {
+        previous.pause();
+        previous.currentTime = 0;
+      }
+      activeId = id;
+      highlightTrack(id === 'custom' ? '' : id);
+      updateNowPlaying();
+      const audio = currentPlayer();
+      if (!audio) return;
+      ensureGraph(audio);
+      if (autoplay || wasPlaying) {
+        try {
+          await audio.play();
+        } catch (error) {
+          console.warn('play blocked', error);
+        }
+      }
+      if ('mediaSession' in navigator && TRACKS[id]) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: TRACKS[id].title,
+          artist: 'AEROCELL',
+          album: TRACKS[id].credit
+        });
+      }
+    }
+
+    function initVisualizer() {
+      const rect = visualizer.getBoundingClientRect();
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      visualizer.width = Math.max(1, Math.floor(rect.width * dpr));
+      visualizer.height = Math.max(1, Math.floor(rect.height * dpr));
+      canvasCtx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+
+    function setupVisualizerBuffers() {
+      const bufferLength = analyser.frequencyBinCount;
+      visualizerData.smoothedData = new Float32Array(bufferLength);
+    }
+
+    function drawVisualizer() {
+      if (!isPlaying || !analyser) return;
+      animationId = requestAnimationFrame(drawVisualizer);
+      const bufferLength = analyser.frequencyBinCount;
+      const timeData = new Uint8Array(bufferLength);
+      analyser.getByteTimeDomainData(timeData);
+
+      const width = visualizer.width;
+      const height = visualizer.height;
+      canvasCtx.fillStyle = `rgba(0, 0, 0, ${isLowEnd ? 0.25 : isMobile ? 0.2 : 0.15})`;
+      canvasCtx.fillRect(0, 0, width, height);
+
+      const centerY = height / 2;
+      const sliceWidth = width / bufferLength;
+      if (visualizerData.smoothedData.length !== bufferLength) {
+        visualizerData.smoothedData = new Float32Array(bufferLength);
+      }
+
+      const step = isLowEnd ? 6 : isMobile ? 3 : 2;
+      for (let i = 0; i < bufferLength; i++) {
+        const currentValue = (timeData[i] - 128) / 128;
+        const enhanced = i < bufferLength * 0.1 ? currentValue * 2.5 : currentValue;
+        visualizerData.smoothedData[i] = visualizerData.smoothedData[i] * 0.7 + enhanced * 0.3;
+      }
+
+      for (let i = 0; i < bufferLength; i += step) {
+        const x = i * sliceWidth;
+        const amplitude = visualizerData.smoothedData[i];
+        const y = centerY + amplitude * centerY * 1.15;
+        if (y < 0 || y > height) continue;
+        const intensity = Math.abs(amplitude);
+        canvasCtx.shadowColor = '#ff0000';
+        canvasCtx.shadowBlur = 4 + intensity * 8;
+        canvasCtx.beginPath();
+        canvasCtx.arc(x, y, visualizerData.dotSize * (isMobile ? 1.4 : 1.8), 0, Math.PI * 2);
+        canvasCtx.fillStyle = '#ffffff';
+        canvasCtx.fill();
+      }
+      canvasCtx.shadowBlur = 0;
+    }
+
+    function updateColorsBasedOnBalance(balance) {
+      const grayscale = 100 - ((balance + 1) / 2) * 100;
+      document.body.style.filter = `grayscale(${grayscale}%)`;
+      leftLabel.classList.toggle('active', balance < -0.1);
+      rightLabel.classList.toggle('active', balance > 0.1);
+    }
+
+    function createParticles() {
+      if (isLowEnd || window.matchMedia('(max-width: 480px)').matches) return;
+      const count = isMobile ? 8 : 18;
+      for (let i = 0; i < count; i++) {
+        const particle = document.createElement('div');
+        particle.className = 'particle';
+        const size = Math.random() * (isMobile ? 80 : 160) + 40;
+        particle.style.width = `${size}px`;
+        particle.style.height = `${size}px`;
+        particle.style.left = `${Math.random() * 100}%`;
+        particle.style.top = '100%';
+        particle.style.setProperty('--x-end', ((Math.random() - 0.5) * 30).toString());
+        particle.style.animationDuration = `${Math.random() * 8 + 8}s`;
+        particle.style.animationDelay = `${Math.random() * 5}s`;
+        particlesContainer.appendChild(particle);
+      }
+    }
+
+    function formatFileSize(bytes) {
+      if (bytes < 1024) return bytes + ' байт';
+      if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' КБ';
+      return (bytes / 1048576).toFixed(1) + ' МБ';
+    }
+
+    Object.keys(TRACKS).forEach((id) => {
+      const audio = createPlayer(TRACKS[id].src);
+      audio.addEventListener('canplaythrough', () => setTrackStatus(id, 'готово', true), { once: true });
+      audio.addEventListener('error', () => setTrackStatus(id, 'ошибка', false), { once: true });
+      players[id] = audio;
+    });
+
+    document.querySelectorAll('.track-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        await unlockAudio();
+        await selectTrack(btn.dataset.track, true);
+      });
+    });
+
+    playBtn.addEventListener('click', async () => {
+      await unlockAudio();
+      const audio = currentPlayer();
+      ensureGraph(audio);
+      audio.play();
+    });
+
+    pauseBtn.addEventListener('click', () => currentPlayer()?.pause());
+
+    stopBtn.addEventListener('click', () => {
+      const audio = currentPlayer();
+      if (!audio) return;
+      audio.pause();
+      audio.currentTime = 0;
+      canvasCtx.clearRect(0, 0, visualizer.width, visualizer.height);
+    });
+
+    seekRange.addEventListener('pointerdown', () => { seeking = true; });
+    seekRange.addEventListener('pointerup', () => { seeking = false; });
+    seekRange.addEventListener('input', () => {
+      const audio = currentPlayer();
+      if (!audio || !audio.duration) return;
+      audio.currentTime = (Number(seekRange.value) / 1000) * audio.duration;
+      currentTimeEl.textContent = formatTime(audio.currentTime);
+    });
+
+    panRange.addEventListener('input', () => {
+      const balance = parseFloat(panRange.value);
+      if (panNode) panNode.pan.value = balance;
+      panValue.textContent = balance.toFixed(2);
+      updateColorsBasedOnBalance(balance);
+    });
+
+    document.getElementById('fileInput').addEventListener('change', async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      if (customPlayer) {
+        customPlayer.pause();
+        if (customPlayer.src.startsWith('blob:')) URL.revokeObjectURL(customPlayer.src);
+      }
+      customPlayer = createPlayer(URL.createObjectURL(file), false);
+      audioInfo.textContent = `${file.name} (${formatFileSize(file.size)})`;
+      await unlockAudio();
+      activeId = 'custom';
+      highlightTrack('');
+      updateNowPlaying();
+      ensureGraph(customPlayer);
+      customPlayer.play();
+    });
+
+    window.addEventListener('resize', () => {
+      window.clearTimeout(window.__vizResize);
+      window.__vizResize = window.setTimeout(initVisualizer, 120);
+    });
+
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.setActionHandler('play', () => playBtn.click());
+      navigator.mediaSession.setActionHandler('pause', () => pauseBtn.click());
+      navigator.mediaSession.setActionHandler('stop', () => stopBtn.click());
+    }
+
+    window.addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault();
+      deferredPrompt = event;
+      installBar.classList.add('visible');
+    });
+
+    installBtn.addEventListener('click', async () => {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        installBar.classList.remove('visible');
+        return;
+      }
+      alert('На iPhone: «Поделиться» → «На экран Домой». На Android откройте меню браузера и выберите «Установить приложение».');
+    });
+
+    installDismiss.addEventListener('click', () => installBar.classList.remove('visible'));
+
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    if (ios && !standalone) {
+      installText.textContent = 'На iPhone: Поделиться → На экран «Домой»';
+      installBar.classList.add('visible');
+      installBtn.textContent = 'Как установить';
+    }
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
+    }
+
+    initVisualizer();
+    createParticles();
+    updateNowPlaying();
+    updateColorsBasedOnBalance(0);
+    Promise.all(Object.keys(TRACKS).map(warmupTrack));
+  </script>
+</body>
+</html>
