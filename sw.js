@@ -1,4 +1,4 @@
-const CACHE = 'aerocell-v4';
+const CACHE = 'aerocell-v5';
 const SHELL = [
   './',
   './index.html',

@@ -19,13 +19,10 @@
     :root {
       --primary: #e53935;
       --primary-dark: #b71c1c;
-      --bg-dark: #0f0f0f;
-      --bg-medium: #1a1a1a;
-      --bg-light: #262626;
+      --bg-dark: #070707;
       --text-main: #fff;
-      --text-secondary: rgba(255, 255, 255, 0.78);
-      --accent-glow: 0 0 15px rgba(229, 57, 53, 0.55);
-      --radius: 16px;
+      --text-secondary: rgba(255, 255, 255, 0.72);
+      --line: rgba(255, 255, 255, 0.88);
       --safe-top: env(safe-area-inset-top, 0px);
       --safe-right: env(safe-area-inset-right, 0px);
       --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -42,67 +39,57 @@
       max-height: 100svh;
       overflow: hidden;
       overscroll-behavior: none;
-      background: linear-gradient(135deg, var(--bg-dark) 0%, #1a0d0d 100%);
+      background: radial-gradient(1200px 700px at 70% 20%, #2a0c0c 0%, #070707 55%);
       font-family: "Segoe UI", Roboto, system-ui, sans-serif;
       color: var(--text-main);
     }
 
     body {
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr) auto;
-      align-items: stretch;
-      justify-items: center;
+      grid-template-rows: auto minmax(0, 1fr);
+      padding: max(6px, var(--safe-top)) max(12px, var(--safe-right)) max(10px, var(--safe-bottom)) max(12px, var(--safe-left));
       gap: 6px;
-      padding: max(6px, var(--safe-top)) max(10px, var(--safe-right)) max(6px, var(--safe-bottom)) max(10px, var(--safe-left));
     }
 
-    button, input, label { touch-action: manipulation; }
+    button, input { touch-action: manipulation; }
 
-    .particles {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 0;
-      overflow: hidden;
-    }
-
-    .particle {
-      position: absolute;
-      border-radius: 50%;
-      background: radial-gradient(circle, var(--primary) 0%, transparent 70%);
-      opacity: 0.35;
-      animation: float 12s infinite linear;
-      filter: blur(1px);
-    }
-
-    @keyframes float {
-      0% { transform: translateY(100vh) translateX(0); opacity: 0; }
-      8% { opacity: 0.35; }
-      100% { transform: translateY(-20vh) translateX(calc(var(--x-end) * 1vw)); opacity: 0; }
-    }
-
-    .header, .container, .footer, .install-bar { position: relative; z-index: 1; }
+    .header, .container, .install-bar { position: relative; z-index: 1; }
 
     .header {
-      text-align: center;
-      width: min(1400px, 100%);
-      margin: 0;
-      flex-shrink: 0;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      width: min(1600px, 100%);
+      margin: 0 auto;
+      min-height: 0;
+    }
+
+    .header a {
+      color: rgba(255, 255, 255, 0.42);
+      font-size: 0.72rem;
+      text-decoration: none;
     }
 
     .header h1 {
       margin: 0;
-      font-size: clamp(1.15rem, 3.2vh, 1.85rem);
+      font-size: clamp(0.95rem, 2.4vh, 1.35rem);
       font-weight: 900;
-      letter-spacing: 0.16em;
+      letter-spacing: 0.22em;
       text-transform: uppercase;
-      text-shadow: 0 0 18px rgba(229, 57, 53, 0.8);
-      line-height: 1.1;
+      text-shadow: 0 0 16px rgba(229, 57, 53, 0.7);
     }
 
-    .header p {
-      display: none;
+    .header p, .now-playing {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
+
+    .header p { display: none; }
 
     .install-bar {
       display: none;
@@ -124,272 +111,382 @@
     .install-bar.visible { display: flex; }
     .install-bar p { margin: 0; font-size: 0.82rem; }
     .install-bar .actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .ghost-btn, .install-bar button {
+      border: none;
+      border-radius: 12px;
+      min-height: 38px;
+      padding: 0 12px;
+      color: var(--text-main);
+      font-weight: 700;
+      cursor: pointer;
+      background: rgba(255, 255, 255, 0.12);
+    }
 
     .container {
       display: grid;
-      grid-template-rows: minmax(110px, 1fr) auto;
-      width: min(1400px, 100%);
+      grid-template-columns: minmax(108px, 148px) minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "tracks viz"
+        "pan pan";
+      width: min(1600px, 100%);
       height: 100%;
       min-height: 0;
-      background: rgba(30, 30, 30, 0.55);
-      border-radius: 18px;
-      overflow: hidden;
-      border: 1px solid rgba(229, 57, 53, 0.3);
-      box-shadow: var(--accent-glow), 0 10px 30px rgba(0, 0, 0, 0.5);
-      backdrop-filter: blur(10px);
+      margin: 0 auto;
+      gap: 12px 16px;
     }
 
-    .visualizer-container {
-      min-height: 0;
-      background: linear-gradient(to bottom, rgba(0,0,0,0.85), rgba(20,0,0,0.4));
-      border-bottom: 1px solid rgba(229, 57, 53, 0.3);
-    }
-
-    #visualizer { width: 100%; height: 100%; display: block; }
-
-    .controls-section {
-      padding: 10px 12px;
+    .track-rail {
+      grid-area: tracks;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      justify-content: space-between;
+      gap: 12px;
       min-height: 0;
-      overflow: hidden;
-      justify-content: flex-start;
-    }
-
-    .track-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 8px;
     }
 
     .track-btn {
       appearance: none;
-      border: 1px solid rgba(229, 57, 53, 0.35);
-      background: linear-gradient(180deg, rgba(50, 20, 20, 0.7), rgba(25, 25, 25, 0.85));
-      color: var(--text-main);
-      border-radius: 14px;
+      flex: 1 1 0;
+      width: 100%;
       min-height: 0;
-      flex: 1;
-      padding: 6px 6px;
+      border: 2px solid var(--line);
+      background: linear-gradient(180deg, #1a1a1a, #101010);
+      color: var(--text-main);
+      border-radius: 22px;
+      padding: 8px;
       cursor: pointer;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       gap: 4px;
-      transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+      transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
     }
 
-    .track-btn .icon { font-size: 1.25rem; line-height: 1; }
-    .track-btn .title { font-weight: 700; font-size: clamp(0.78rem, 2.8vw, 0.98rem); }
-    .track-btn .meta { font-size: 0.7rem; color: var(--text-secondary); }
-    .track-btn .status { font-size: 0.68rem; color: #8d8d8d; }
-
-    .track-btn.ready .status { color: #8bc34a; }
+    .track-btn .icon { display: none; }
+    .track-btn .title {
+      font-weight: 800;
+      font-size: clamp(0.82rem, 2vh, 1.08rem);
+      letter-spacing: 0.02em;
+      text-align: center;
+      line-height: 1.15;
+    }
+    .track-btn .meta { display: none; }
+    .track-btn .status {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #555;
+      font-size: 0;
+      color: transparent;
+    }
+    .track-btn.ready .status { background: #8bc34a; box-shadow: 0 0 8px #8bc34a; }
     .track-btn.active {
       border-color: var(--primary);
-      box-shadow: 0 0 0 2px rgba(229, 57, 53, 0.35), 0 6px 16px rgba(0, 0, 0, 0.35);
-      background: linear-gradient(180deg, rgba(183, 28, 28, 0.55), rgba(40, 16, 16, 0.9));
+      background: linear-gradient(180deg, #b71c1c, #3a1010);
+      box-shadow: 0 0 0 2px rgba(229, 57, 53, 0.35), 0 10px 24px rgba(0, 0, 0, 0.35);
+      transform: translateY(-1px);
+    }
+    .track-btn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+    .visualizer-stage {
+      grid-area: viz;
+      position: relative;
+      min-height: 0;
+      border-radius: 24px;
+      overflow: hidden;
+      background: #050505;
+      border: 1px solid rgba(229, 57, 53, 0.22);
+      box-shadow: inset 0 0 80px rgba(229, 57, 53, 0.08);
     }
 
-    .track-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+    #visualizer { width: 100%; height: 100%; display: block; }
+
+    .viz-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      padding: 12px 16px 16px;
+      gap: 6px;
+    }
+
+    .viz-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 0;
+    }
 
     .now-playing {
-      text-align: center;
-      font-size: 0.8rem;
-      color: var(--text-secondary);
-      min-height: 1.1em;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      pointer-events: none;
+      justify-self: start;
+      min-width: 0;
+      flex: 1;
+      text-shadow: 0 1px 8px #000;
     }
 
-    .now-playing strong { color: #fff; }
-
-    .player-controls {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 8px;
-    }
-
-    .player-btn, .ghost-btn, .install-bar button {
-      border: none;
-      border-radius: 12px;
-      min-height: 42px;
-      color: var(--text-main);
-      font-weight: 700;
-      cursor: pointer;
-      background: linear-gradient(to bottom, var(--bg-light), var(--bg-medium));
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-      font-size: 0.95rem;
-    }
-
-    .player-btn.primary { background: linear-gradient(180deg, #e53935, #b71c1c); }
-    .player-btn:disabled, .track-btn:disabled { opacity: 0.5; cursor: wait; }
-
-    .progress-row {
-      display: grid;
-      grid-template-columns: 42px 1fr 42px;
-      gap: 8px;
-      align-items: center;
+    .times {
+      flex-shrink: 0;
       font-variant-numeric: tabular-nums;
-      font-size: 0.78rem;
+      font-size: 0.72rem;
       color: var(--text-secondary);
+      text-shadow: 0 1px 8px #000;
+    }
+
+    #seekRange {
+      pointer-events: auto;
+      height: 18px;
+      width: 100%;
+      justify-self: stretch;
+    }
+
+    .transport {
+      pointer-events: auto;
+      justify-self: center;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .icon-btn {
+      width: 58px;
+      height: 58px;
+      border-radius: 50%;
+      border: 2px solid var(--line);
+      background: rgba(8, 8, 8, 0.55);
+      color: #fff;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+    }
+
+    .icon-btn.primary {
+      background: linear-gradient(180deg, #e53935, #b71c1c);
+      border-color: #fff;
+    }
+
+    .icon-btn svg { width: 22px; height: 22px; fill: currentColor; }
+    .icon-btn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+    .icon-btn:disabled { opacity: 0.5; cursor: wait; }
+
+    .seek-chip {
+      display: none;
+    }
+
+    #seekRange::-webkit-slider-runnable-track {
+      height: 3px;
+      background: rgba(255, 255, 255, 0.28);
+      border-radius: 3px;
+    }
+
+    #seekRange::-moz-range-track {
+      height: 3px;
+      background: rgba(255, 255, 255, 0.28);
+      border: none;
+      border-radius: 3px;
+    }
+
+    .pan-hero {
+      grid-area: pan;
+      min-width: 0;
+    }
+
+    .pan-shell {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px 18px;
+      min-height: clamp(92px, 16vh, 128px);
+      padding: 8px 22px 12px;
+      border: 2px solid var(--line);
+      border-radius: 28px;
+      background: linear-gradient(180deg, rgba(24, 24, 24, 0.96), rgba(8, 8, 8, 0.96));
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45), 0 0 40px rgba(229, 57, 53, 0.16);
+    }
+
+    .pan-caption {
+      grid-column: 1 / -1;
+      text-align: center;
+      font-size: 0.72rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+    }
+
+    .pan-end {
+      width: clamp(42px, 6vw, 64px);
+      height: clamp(42px, 6vw, 64px);
+      display: grid;
+      place-items: center;
+      font-size: clamp(1.45rem, 4.2vh, 2.35rem);
+      font-weight: 800;
+      border-radius: 50%;
+      color: rgba(255, 255, 255, 0.55);
+      transition: color 0.15s ease, transform 0.15s ease, text-shadow 0.15s ease, background 0.15s ease;
+    }
+
+    .pan-end.active {
+      color: #fff;
+      background: var(--primary);
+      transform: scale(1.08);
+      box-shadow: 0 0 22px rgba(229, 57, 53, 0.85);
+    }
+
+    .pan-track {
+      position: relative;
+      height: 56px;
+      display: grid;
+      align-items: center;
+    }
+
+    .pan-track::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 4px;
+      border-radius: 4px;
+      background: linear-gradient(90deg, #4fc3f7 0%, #fff 50%, #e53935 100%);
+      box-shadow: 0 0 12px rgba(255, 255, 255, 0.35);
+    }
+
+    .pan-track::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 2px;
+      height: 18px;
+      transform: translate(-50%, -50%);
+      background: rgba(255, 255, 255, 0.7);
+      border-radius: 2px;
+      pointer-events: none;
+    }
+
+    .pan-glow {
+      position: absolute;
+      left: var(--thumb, 50%);
+      top: 50%;
+      width: 84px;
+      height: 84px;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(229, 57, 53, 0.45) 0%, transparent 70%);
+      pointer-events: none;
     }
 
     input[type="range"] {
       -webkit-appearance: none;
       appearance: none;
       width: 100%;
-      height: 10px;
-      background: linear-gradient(90deg, #000, var(--primary));
-      border-radius: 8px;
-      outline: none;
-    }
-
-    input[type="range"]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      background: #fff;
-      border: 2px solid var(--primary);
-      box-shadow: 0 0 12px rgba(229, 57, 53, 0.8);
-    }
-
-    input[type="range"]::-moz-range-thumb {
-      width: 24px;
-      height: 24px;
-      border: 2px solid var(--primary);
-      border-radius: 50%;
-      background: #fff;
-    }
-
-    .app-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      min-height: 0;
-    }
-
-    .control-group {
-      background: linear-gradient(to bottom, rgba(40, 40, 40, 0.7), rgba(30, 30, 30, 0.7));
-      border-radius: 12px;
-      padding: 10px;
-      border: 1px solid rgba(229, 57, 53, 0.3);
-      min-width: 0;
-    }
-
-    .control-group h2, .control-group h3 {
-      margin: 0 0 8px;
-      text-align: center;
-      font-size: 0.88rem;
-      letter-spacing: 0.04em;
-      text-shadow: 0 0 5px rgba(229, 57, 53, 0.5);
-    }
-
-    .slider-label {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 6px;
-      font-weight: 500;
-    }
-
-    .channel-label {
-      width: 28px;
-      height: 28px;
-      display: grid;
-      place-items: center;
-      border-radius: 50%;
-      background: var(--bg-light);
-      font-weight: 700;
-    }
-
-    .channel-label.active {
-      background: var(--primary);
-      transform: scale(1.12);
-      box-shadow: 0 0 15px rgba(229, 57, 53, 0.8);
-    }
-
-    .slider-value {
-      background: rgba(229, 57, 53, 0.25);
-      padding: 4px 12px;
-      border-radius: 10px;
-      min-width: 50px;
-      text-align: center;
-      font-weight: 600;
-    }
-
-    .control-group.pan-only {
-      margin-top: auto;
-    }
-
-    .footer {
-      width: min(1400px, 100%);
+      background: transparent;
       margin: 0;
-      text-align: center;
-      color: var(--text-secondary);
-      font-size: 0.7rem;
-      line-height: 1.25;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      position: relative;
+      z-index: 1;
     }
 
-    .footer p { margin: 0; }
-    .footer a { color: #ff8a80; }
-
-    @media (max-width: 700px) {
-      .app-grid { grid-template-columns: 1fr 1fr; }
-      .track-btn .meta { display: none; }
-      .particle { display: none; }
-      .container { backdrop-filter: none; background: rgba(30, 30, 30, 0.86); }
+    #panRange {
+      height: 56px;
     }
 
-    /* Горизонтальный планшет / широкий ландшафт: дашборд в два столбца */
-    @media (orientation: landscape) and (min-width: 740px) {
-      body { gap: 4px; }
+    input[type="range"]::-webkit-slider-runnable-track {
+      height: 4px;
+      background: transparent;
+    }
+
+    input[type="range"]::-moz-range-track {
+      height: 4px;
+      background: transparent;
+      border: none;
+    }
+
+    #panRange::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #fff 0%, #f2f2f2 55%, #d0d0d0 100%);
+      border: 4px solid #111;
+      box-shadow: 0 0 0 3px #fff, 0 6px 18px rgba(0, 0, 0, 0.45);
+      cursor: grab;
+    }
+
+    #panRange::-moz-range-thumb {
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      background: #fff;
+      border: 4px solid #111;
+      box-shadow: 0 0 0 3px #fff, 0 6px 18px rgba(0, 0, 0, 0.45);
+      cursor: grab;
+    }
+
+    #seekRange::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      border: 2px solid var(--primary);
+    }
+
+    #seekRange::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      border: 2px solid var(--primary);
+    }
+
+    @media (orientation: portrait) and (max-width: 900px) {
       .container {
-        grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.95fr);
-        grid-template-rows: minmax(0, 1fr);
-      }
-      .visualizer-container {
-        border-bottom: none;
-        border-right: 1px solid rgba(229, 57, 53, 0.3);
-        height: 100%;
-      }
-      .controls-section {
-        padding: 12px 14px;
+        grid-template-columns: 1fr;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        grid-template-areas:
+          "tracks"
+          "viz"
+          "pan";
         gap: 10px;
       }
-      .track-grid { flex: 0 0 auto; }
-      .track-btn { padding: 8px 6px; }
-      .player-btn { min-height: 46px; }
-      .control-group.pan-only { margin-top: auto; }
+
+      .track-rail {
+        flex-direction: row;
+        justify-content: stretch;
+        gap: 10px;
+      }
+
+      .track-btn {
+        min-height: 64px;
+        border-radius: 16px;
+      }
+
+      .icon-btn { width: 50px; height: 50px; }
+      .pan-shell { min-height: 84px; padding: 6px 14px 10px; gap: 8px 10px; }
     }
 
-    @media (orientation: landscape) and (max-height: 520px) {
-      .header h1 { font-size: 1.05rem; }
-      .track-btn .status, .track-btn .meta { display: none; }
-      .control-group h2, .control-group h3 { margin-bottom: 4px; font-size: 0.78rem; }
-      .player-btn { min-height: 38px; font-size: 0.85rem; }
-      .footer { font-size: 0.62rem; }
+    @media (max-height: 520px) {
+      .header h1 { font-size: 0.85rem; }
+      .icon-btn { width: 46px; height: 46px; }
+      .pan-shell { min-height: 76px; }
+      #panRange::-webkit-slider-thumb { width: 40px; height: 40px; }
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .particle { animation: none; opacity: 0.15; }
       * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
     }
   </style>
 </head>
 <body>
-  <div class="particles" id="particles" aria-hidden="true"></div>
-
   <header class="header">
     <h1>AEROCELL</h1>
-    <p>Стенд стерео-баланса: выберите жанр и сразу слушайте. Три трека уже внутри приложения.</p>
+    <p>Стенд стерео-баланса</p>
+    <a href="privacy.html">Конфиденциальность</a>
   </header>
 
   <div class="install-bar" id="installBar">
@@ -401,61 +498,62 @@
   </div>
 
   <main class="container">
-    <section class="visualizer-container" aria-label="Аудио визуализатор">
+    <div class="track-rail" role="radiogroup" aria-label="Предустановленные треки">
+      <button class="track-btn active" type="button" role="radio" aria-checked="true" data-track="club" id="track-club">
+        <span class="icon" aria-hidden="true">🎧</span>
+        <span class="title">Клуб</span>
+        <span class="meta">Electro House</span>
+        <span class="status" data-status>загрузка…</span>
+      </button>
+      <button class="track-btn" type="button" role="radio" aria-checked="false" data-track="classical" id="track-classical">
+        <span class="icon" aria-hidden="true">🎻</span>
+        <span class="title">Классика</span>
+        <span class="meta">Вивальди · Весна</span>
+        <span class="status" data-status>загрузка…</span>
+      </button>
+      <button class="track-btn" type="button" role="radio" aria-checked="false" data-track="rock" id="track-rock">
+        <span class="icon" aria-hidden="true">🎸</span>
+        <span class="title">Рок</span>
+        <span class="meta">Hard Rock</span>
+        <span class="status" data-status>загрузка…</span>
+      </button>
+    </div>
+
+    <section class="visualizer-stage" aria-label="Аудио визуализатор">
       <canvas id="visualizer"></canvas>
+      <div class="viz-overlay">
+        <div class="viz-top">
+          <div class="now-playing" id="nowPlaying">Клубная</div>
+          <div class="times"><span id="currentTime">0:00</span> / <span id="durationTime">0:00</span></div>
+        </div>
+        <input type="range" id="seekRange" min="0" max="1000" value="0" step="1" aria-label="Позиция трека">
+        <div></div>
+        <div class="transport">
+          <button class="icon-btn primary" id="playBtn" type="button" aria-label="Play">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <button class="icon-btn" id="pauseBtn" type="button" aria-label="Pause">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
+          </button>
+          <button class="icon-btn" id="stopBtn" type="button" aria-label="Stop">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h12v12H6z"/></svg>
+          </button>
+        </div>
+      </div>
     </section>
 
-    <section class="controls-section">
-      <div class="track-grid" role="radiogroup" aria-label="Предустановленные треки">
-        <button class="track-btn active" type="button" role="radio" aria-checked="true" data-track="club" id="track-club">
-          <span class="icon" aria-hidden="true">🎧</span>
-          <span class="title">Клубная</span>
-          <span class="meta">Electro House</span>
-          <span class="status" data-status>загрузка…</span>
-        </button>
-        <button class="track-btn" type="button" role="radio" aria-checked="false" data-track="classical" id="track-classical">
-          <span class="icon" aria-hidden="true">🎻</span>
-          <span class="title">Классика</span>
-          <span class="meta">Вивальди · Весна</span>
-          <span class="status" data-status>загрузка…</span>
-        </button>
-        <button class="track-btn" type="button" role="radio" aria-checked="false" data-track="rock" id="track-rock">
-          <span class="icon" aria-hidden="true">🎸</span>
-          <span class="title">Рок</span>
-          <span class="meta">Hard Rock</span>
-          <span class="status" data-status>загрузка…</span>
-        </button>
-      </div>
-
-      <div class="now-playing" id="nowPlaying">Выбрано: <strong>Клубная</strong></div>
-
-      <div class="progress-row">
-        <span id="currentTime">0:00</span>
-        <input type="range" id="seekRange" min="0" max="1000" value="0" step="1" aria-label="Позиция трека">
-        <span id="durationTime">0:00</span>
-      </div>
-
-      <div class="player-controls">
-        <button class="player-btn primary" id="playBtn" type="button">PLAY</button>
-        <button class="player-btn" id="pauseBtn" type="button">PAUSE</button>
-        <button class="player-btn" id="stopBtn" type="button">STOP</button>
-      </div>
-
-      <div class="control-group pan-only">
-        <h2>Стерео баланс</h2>
-        <div class="slider-label">
-          <span class="channel-label" id="leftLabel">L</span>
-          <span class="slider-value" id="panValue">0.00</span>
-          <span class="channel-label" id="rightLabel">R</span>
+    <section class="pan-hero" aria-label="Стерео баланс">
+      <div class="pan-shell">
+        <div class="pan-caption">Стерео баланс</div>
+        <span class="pan-end" id="leftLabel">L</span>
+        <div class="pan-track" id="panTrack">
+          <div class="pan-glow" id="panGlow" aria-hidden="true"></div>
+          <input type="range" min="-1" max="1" step="0.01" value="0" id="panRange" aria-label="Стерео баланс, левый — правый">
         </div>
-        <input type="range" min="-1" max="1" step="0.01" value="0" id="panRange" aria-label="Стерео баланс">
+        <span class="pan-end" id="rightLabel">R</span>
       </div>
     </section>
   </main>
-
-  <footer class="footer">
-    <p>Вивальди CC0 · Beat Doctor CC BY · Kevin MacLeod CC BY · <a href="privacy.html">Конфиденциальность</a></p>
-  </footer>
 
   <script>
     const TRACKS = {
@@ -467,7 +565,7 @@
     const visualizer = document.getElementById('visualizer');
     const canvasCtx = visualizer.getContext('2d');
     const panRange = document.getElementById('panRange');
-    const panValue = document.getElementById('panValue');
+    const panTrack = document.getElementById('panTrack');
     const playBtn = document.getElementById('playBtn');
     const pauseBtn = document.getElementById('pauseBtn');
     const stopBtn = document.getElementById('stopBtn');
@@ -477,7 +575,6 @@
     const nowPlaying = document.getElementById('nowPlaying');
     const leftLabel = document.getElementById('leftLabel');
     const rightLabel = document.getElementById('rightLabel');
-    const particlesContainer = document.getElementById('particles');
     const installBar = document.getElementById('installBar');
     const installBtn = document.getElementById('installBtn');
     const installDismiss = document.getElementById('installDismiss');
@@ -485,19 +582,24 @@
 
     const isMobile = window.innerWidth < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const isLowEnd = navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 2;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const players = {};
     let activeId = 'club';
-    let audioCtx, panNode, gainNode, analyser;
+    let audioCtx, panNode, gainNode, splitter, analyserL, analyserR;
     let isPlaying = false;
     let animationId = null;
     let seeking = false;
     let deferredPrompt = null;
     let unlocked = false;
     const sources = new WeakMap();
-
-    const visualizerData = {
-      smoothedData: new Float32Array(0),
-      dotSize: isLowEnd ? 1 : isMobile ? 1.2 : 1.5
+    const WAVE_POINTS = isLowEnd ? 64 : 84;
+    const viz = {
+      rawL: null,
+      rawR: null,
+      smoothL: new Float32Array(WAVE_POINTS),
+      smoothR: new Float32Array(WAVE_POINTS),
+      drawL: new Float32Array(WAVE_POINTS),
+      drawR: new Float32Array(WAVE_POINTS)
     };
 
     function currentPlayer() {
@@ -529,7 +631,7 @@
 
     function updateNowPlaying() {
       const track = TRACKS[activeId];
-      nowPlaying.innerHTML = `Выбрано: <strong>${track.title}</strong> · ${track.credit}`;
+      nowPlaying.textContent = `${track.title} · ${track.credit}`;
     }
 
     function createPlayer(src) {
@@ -558,17 +660,14 @@
       audio.addEventListener('play', () => {
         if (audio !== currentPlayer()) return;
         isPlaying = true;
-        drawVisualizer();
       });
       audio.addEventListener('pause', () => {
         if (audio !== currentPlayer()) return;
         isPlaying = false;
-        if (animationId) cancelAnimationFrame(animationId);
       });
       audio.addEventListener('ended', () => {
         if (audio !== currentPlayer()) return;
         isPlaying = false;
-        if (animationId) cancelAnimationFrame(animationId);
       });
     }
 
@@ -595,15 +694,23 @@
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         gainNode = audioCtx.createGain();
         panNode = audioCtx.createStereoPanner();
-        analyser = audioCtx.createAnalyser();
+        splitter = audioCtx.createChannelSplitter(2);
+        analyserL = audioCtx.createAnalyser();
+        analyserR = audioCtx.createAnalyser();
         gainNode.gain.value = 0.7;
         panNode.pan.value = parseFloat(panRange.value);
+        const fft = isLowEnd ? 1024 : 2048;
+        [analyserL, analyserR].forEach((node) => {
+          node.fftSize = fft;
+          node.smoothingTimeConstant = 0.72;
+        });
         gainNode.connect(panNode);
-        panNode.connect(analyser);
-        analyser.connect(audioCtx.destination);
-        analyser.fftSize = isLowEnd ? 1024 : 2048;
-        analyser.smoothingTimeConstant = 0.8;
-        setupVisualizerBuffers();
+        panNode.connect(audioCtx.destination);
+        panNode.connect(splitter);
+        splitter.connect(analyserL, 0);
+        splitter.connect(analyserR, 1);
+        viz.rawL = new Uint8Array(analyserL.fftSize);
+        viz.rawR = new Uint8Array(analyserR.fftSize);
       }
       if (audioCtx.state === 'suspended') audioCtx.resume();
       if (!sources.has(audio)) {
@@ -660,75 +767,139 @@
       canvasCtx.setTransform(1, 0, 0, 1, 0, 0);
     }
 
-    function setupVisualizerBuffers() {
-      const bufferLength = analyser.frequencyBinCount;
-      visualizerData.smoothedData = new Float32Array(bufferLength);
+    function sampleWave(analyser, raw, target, time, channel, playing) {
+      const n = target.length;
+      if (playing && analyser && raw) {
+        analyser.getByteTimeDomainData(raw);
+        const step = raw.length / n;
+        for (let i = 0; i < n; i++) {
+          const start = Math.floor(i * step);
+          const end = Math.max(start + 1, Math.floor((i + 1) * step));
+          let acc = 0;
+          for (let j = start; j < end; j++) acc += raw[j];
+          const v = ((acc / (end - start)) - 128) / 128;
+          target[i] = target[i] * 0.84 + v * 0.16;
+        }
+        return;
+      }
+      for (let i = 0; i < n; i++) {
+        const x = i / (n - 1);
+        const idle = Math.sin((x * 3.6 + time * (0.55 + channel * 0.12)) * Math.PI) * 0.22
+          + Math.sin((x * 6.2 + time * 0.32) * Math.PI) * 0.07;
+        target[i] = target[i] * 0.9 + idle * 0.1;
+      }
     }
 
-    function drawVisualizer() {
-      if (!isPlaying || !analyser) return;
-      animationId = requestAnimationFrame(drawVisualizer);
-      const bufferLength = analyser.frequencyBinCount;
-      const timeData = new Uint8Array(bufferLength);
-      analyser.getByteTimeDomainData(timeData);
+    function smoothNeighbors(samples, out) {
+      const n = samples.length;
+      for (let i = 0; i < n; i++) {
+        const a = samples[Math.max(0, i - 2)];
+        const b = samples[Math.max(0, i - 1)];
+        const c = samples[i];
+        const d = samples[Math.min(n - 1, i + 1)];
+        const e = samples[Math.min(n - 1, i + 2)];
+        out[i] = (a + b * 2 + c * 3 + d * 2 + e) / 9;
+      }
+      return out;
+    }
 
+    function drawWave(samples, midY, amp, stroke, glow, fill) {
+      const width = visualizer.width;
+      const n = samples.length;
+      canvasCtx.beginPath();
+      canvasCtx.moveTo(0, midY + samples[0] * amp);
+      for (let i = 1; i < n; i++) {
+        const x0 = ((i - 1) / (n - 1)) * width;
+        const x1 = (i / (n - 1)) * width;
+        const y0 = midY + samples[i - 1] * amp;
+        const y1 = midY + samples[i] * amp;
+        const cpx = (x0 + x1) / 2;
+        canvasCtx.quadraticCurveTo(x0, y0, cpx, (y0 + y1) / 2);
+      }
+      canvasCtx.lineTo(width, midY + samples[n - 1] * amp);
+      canvasCtx.lineWidth = Math.max(2.4, width / 420);
+      canvasCtx.strokeStyle = stroke;
+      canvasCtx.shadowColor = glow;
+      canvasCtx.shadowBlur = reduceMotion ? 0 : 18;
+      canvasCtx.lineJoin = 'round';
+      canvasCtx.lineCap = 'round';
+      canvasCtx.stroke();
+
+      canvasCtx.shadowBlur = 0;
+      canvasCtx.lineTo(width, midY);
+      canvasCtx.lineTo(0, midY);
+      canvasCtx.closePath();
+      canvasCtx.fillStyle = fill;
+      canvasCtx.fill();
+    }
+
+    function drawVisualizer(ts) {
+      animationId = requestAnimationFrame(drawVisualizer);
       const width = visualizer.width;
       const height = visualizer.height;
-      canvasCtx.fillStyle = `rgba(0, 0, 0, ${isLowEnd ? 0.25 : isMobile ? 0.2 : 0.15})`;
+      if (!width || !height) return;
+
+      const time = (ts || 0) / 1000;
+      const pan = panNode ? panNode.pan.value : parseFloat(panRange.value);
+      const playing = Boolean(isPlaying && analyserL && analyserR);
+
+      sampleWave(analyserL, viz.rawL, viz.smoothL, time, 0, playing);
+      sampleWave(analyserR, viz.rawR, viz.smoothR, time, 1, playing);
+
+      canvasCtx.fillStyle = '#050505';
       canvasCtx.fillRect(0, 0, width, height);
 
-      const centerY = height / 2;
-      const sliceWidth = width / bufferLength;
-      if (visualizerData.smoothedData.length !== bufferLength) {
-        visualizerData.smoothedData = new Float32Array(bufferLength);
-      }
+      const bg = canvasCtx.createLinearGradient(0, 0, 0, height);
+      bg.addColorStop(0, 'rgba(80, 12, 12, 0.22)');
+      bg.addColorStop(0.5, 'rgba(0, 0, 0, 0)');
+      bg.addColorStop(1, 'rgba(80, 12, 12, 0.28)');
+      canvasCtx.fillStyle = bg;
+      canvasCtx.fillRect(0, 0, width, height);
 
-      const step = isLowEnd ? 6 : isMobile ? 3 : 2;
-      for (let i = 0; i < bufferLength; i++) {
-        const currentValue = (timeData[i] - 128) / 128;
-        const enhanced = i < bufferLength * 0.1 ? currentValue * 2.5 : currentValue;
-        visualizerData.smoothedData[i] = visualizerData.smoothedData[i] * 0.7 + enhanced * 0.3;
-      }
+      canvasCtx.strokeStyle = 'rgba(255,255,255,0.06)';
+      canvasCtx.lineWidth = 1;
+      canvasCtx.beginPath();
+      canvasCtx.moveTo(0, height * 0.5);
+      canvasCtx.lineTo(width, height * 0.5);
+      canvasCtx.stroke();
 
-      for (let i = 0; i < bufferLength; i += step) {
-        const x = i * sliceWidth;
-        const amplitude = visualizerData.smoothedData[i];
-        const y = centerY + amplitude * centerY * 1.15;
-        if (y < 0 || y > height) continue;
-        const intensity = Math.abs(amplitude);
-        canvasCtx.shadowColor = '#ff0000';
-        canvasCtx.shadowBlur = 4 + intensity * 8;
-        canvasCtx.beginPath();
-        canvasCtx.arc(x, y, visualizerData.dotSize * (isMobile ? 1.4 : 1.8), 0, Math.PI * 2);
-        canvasCtx.fillStyle = '#ffffff';
-        canvasCtx.fill();
-      }
-      canvasCtx.shadowBlur = 0;
+      const leftAmp = height * (0.22 + Math.max(0, -pan) * 0.1);
+      const rightAmp = height * (0.22 + Math.max(0, pan) * 0.1);
+      const leftAlpha = 0.78 + Math.max(0, -pan) * 0.22;
+      const rightAlpha = 0.78 + Math.max(0, pan) * 0.22;
+
+      drawWave(
+        smoothNeighbors(viz.smoothL, viz.drawL),
+        height * 0.36,
+        leftAmp,
+        `rgba(255,255,255,${leftAlpha})`,
+        'rgba(229,57,53,0.95)',
+        'rgba(229,57,53,0.10)'
+      );
+      drawWave(
+        smoothNeighbors(viz.smoothR, viz.drawR),
+        height * 0.64,
+        rightAmp,
+        `rgba(255,210,205,${rightAlpha})`,
+        'rgba(255,255,255,0.55)',
+        'rgba(255,255,255,0.06)'
+      );
+
+      const vignette = canvasCtx.createRadialGradient(
+        width * 0.5, height * 0.5, height * 0.15,
+        width * 0.5, height * 0.5, height * 0.75
+      );
+      vignette.addColorStop(0, 'rgba(0,0,0,0)');
+      vignette.addColorStop(1, 'rgba(0,0,0,0.38)');
+      canvasCtx.fillStyle = vignette;
+      canvasCtx.fillRect(0, 0, width, height);
     }
 
-    function updateColorsBasedOnBalance(balance) {
-      const grayscale = 100 - ((balance + 1) / 2) * 100;
-      document.body.style.filter = `grayscale(${grayscale}%)`;
-      leftLabel.classList.toggle('active', balance < -0.1);
-      rightLabel.classList.toggle('active', balance > 0.1);
-    }
-
-    function createParticles() {
-      if (isLowEnd || window.matchMedia('(max-width: 480px)').matches) return;
-      const count = isMobile ? 8 : 18;
-      for (let i = 0; i < count; i++) {
-        const particle = document.createElement('div');
-        particle.className = 'particle';
-        const size = Math.random() * (isMobile ? 80 : 160) + 40;
-        particle.style.width = `${size}px`;
-        particle.style.height = `${size}px`;
-        particle.style.left = `${Math.random() * 100}%`;
-        particle.style.top = '100%';
-        particle.style.setProperty('--x-end', ((Math.random() - 0.5) * 30).toString());
-        particle.style.animationDuration = `${Math.random() * 8 + 8}s`;
-        particle.style.animationDelay = `${Math.random() * 5}s`;
-        particlesContainer.appendChild(particle);
-      }
+    function updatePanUI(balance) {
+      const pct = ((balance + 1) / 2) * 100;
+      panTrack.style.setProperty('--thumb', `${pct}%`);
+      leftLabel.classList.toggle('active', balance < -0.08);
+      rightLabel.classList.toggle('active', balance > 0.08);
     }
 
     Object.keys(TRACKS).forEach((id) => {
@@ -759,7 +930,6 @@
       if (!audio) return;
       audio.pause();
       audio.currentTime = 0;
-      canvasCtx.clearRect(0, 0, visualizer.width, visualizer.height);
     });
 
     seekRange.addEventListener('pointerdown', () => { seeking = true; });
@@ -774,8 +944,7 @@
     panRange.addEventListener('input', () => {
       const balance = parseFloat(panRange.value);
       if (panNode) panNode.pan.value = balance;
-      panValue.textContent = balance.toFixed(2);
-      updateColorsBasedOnBalance(balance);
+      updatePanUI(balance);
     });
 
     window.addEventListener('resize', () => {
@@ -828,9 +997,9 @@
     }
 
     initVisualizer();
-    createParticles();
     updateNowPlaying();
-    updateColorsBasedOnBalance(0);
+    updatePanUI(0);
+    requestAnimationFrame(drawVisualizer);
     Promise.all(Object.keys(TRACKS).map(warmupTrack));
   </script>
 </body>
