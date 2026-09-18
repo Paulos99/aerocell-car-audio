@@ -4,13 +4,17 @@ PWA-стенд стерео-баланса: три трека уже лежат 
 
 ## Треки
 
-| Кнопка | Файл | Композиция |
-|---|---|---|
-| Клубная | `audio/club.mp3` | Club Diver — Kevin MacLeod |
-| Классика | `audio/classical.mp3` | Air Prelude — Kevin MacLeod |
-| Рок | `audio/rock.mp3` | Iron Horse — Kevin MacLeod |
+Все файлы в приложении — MP3 **320 kbps CBR**.
 
-Музыка: [Kevin MacLeod](https://incompetech.com/), [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+| Кнопка | Файл | Композиция | Лицензия |
+|---|---|---|---|
+| Клубная | `audio/club.mp3` | Beat Doctor — *Alright* (electro house) | [CC BY 2.0 UK](https://creativecommons.org/licenses/by/2.0/uk/) |
+| Классика | `audio/classical.mp3` | Вивальди, «Времена года»: Весна, I. Allegro | запись CC0 |
+| Рок | `audio/rock.mp3` | Kevin MacLeod — *Big Rock* (incompetech.com) | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
+
+AC/DC и другой коммерческий каталог в приложение не входят: его нельзя легально скачивать и раздавать вместе с сайтом. Рок-кнопка играет свободный hard rock в том же духе.
+
+Загрузки своего файла нет: на стенде только эти три трека.
 
 ## Запуск локально
 

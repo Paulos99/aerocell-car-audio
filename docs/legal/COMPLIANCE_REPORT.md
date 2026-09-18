@@ -10,9 +10,9 @@
 
 - HTML/PWA, без бэкенда и без своей БД
 - Нет форм ПД, нет логина
-- `<input type="file" accept="audio/*">` — только локально в браузере
+- Нет загрузки пользовательских файлов: только три предустановленных трека
 - Нет Google Analytics / Метрики / рекламы
-- Музыка CC BY 3.0, указание автора в интерфейсе и README
+- Музыка: Вивальди CC0; Beat Doctor CC BY 2.0 UK; Kevin MacLeod CC BY 3.0. Attribution в интерфейсе и README
 - Хостинг предполагается GitHub Pages (США)
 
 ## Реестр РКН
@@ -41,8 +41,8 @@ Status: OPEN
 ### LC-003
 Risk: 🟢 LOW  
 Category: IP  
-Issue: Треки Kevin MacLeod, CC BY 3.0. Attribution добавлен в UI, README, `audio/CREDITS.md`.  
-Action: Не убирать указание автора.  
+Issue: Треки с открытыми лицензиями. Attribution добавлен в UI, README, `audio/CREDITS.md`.  
+Action: Не убирать указание автора. Не добавлять коммерческий каталог (AC/DC и т.п.).  
 Owner: Dev  
 Status: CLOSED (технически)
 
@@ -68,7 +68,7 @@ Required before production: YES, если публикация от чужого
 - Страница `privacy.html`
 - Attribution музыки
 - Нет скрытой аналитики
-- Локальный file input без upload
+- Нет пользовательской загрузки файлов
 
 ## Production gate
 

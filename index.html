@@ -322,24 +322,9 @@
       font-weight: 600;
     }
 
-    .file-upload-label {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 2px;
-      cursor: pointer;
-      min-height: 52px;
-      padding: 8px;
-      border: 2px dashed rgba(229, 57, 53, 0.4);
-      border-radius: 12px;
-      background: rgba(40, 40, 40, 0.45);
-      text-align: center;
+    .control-group.pan-only {
+      margin-top: auto;
     }
-
-    .file-upload-label span { font-size: 0.82rem; font-weight: 600; }
-    .audio-info { font-size: 0.7rem; color: var(--text-secondary); font-weight: 400; }
-    #fileInput { display: none; }
 
     .footer {
       width: min(1400px, 100%);
@@ -382,8 +367,7 @@
       .track-grid { flex: 0 0 auto; }
       .track-btn { padding: 8px 6px; }
       .player-btn { min-height: 46px; }
-      .file-upload-label { min-height: 64px; }
-      .app-grid { margin-top: auto; }
+      .control-group.pan-only { margin-top: auto; }
     }
 
     @media (orientation: landscape) and (max-height: 520px) {
@@ -391,8 +375,6 @@
       .track-btn .status, .track-btn .meta { display: none; }
       .control-group h2, .control-group h3 { margin-bottom: 4px; font-size: 0.78rem; }
       .player-btn { min-height: 38px; font-size: 0.85rem; }
-      .file-upload-label { min-height: 42px; padding: 4px; }
-      .audio-info { display: none; }
       .footer { font-size: 0.62rem; }
     }
 
@@ -428,19 +410,19 @@
         <button class="track-btn active" type="button" role="radio" aria-checked="true" data-track="club" id="track-club">
           <span class="icon" aria-hidden="true">🎧</span>
           <span class="title">Клубная</span>
-          <span class="meta">Club Diver</span>
+          <span class="meta">Electro House</span>
           <span class="status" data-status>загрузка…</span>
         </button>
         <button class="track-btn" type="button" role="radio" aria-checked="false" data-track="classical" id="track-classical">
           <span class="icon" aria-hidden="true">🎻</span>
           <span class="title">Классика</span>
-          <span class="meta">Air Prelude</span>
+          <span class="meta">Вивальди · Весна</span>
           <span class="status" data-status>загрузка…</span>
         </button>
         <button class="track-btn" type="button" role="radio" aria-checked="false" data-track="rock" id="track-rock">
           <span class="icon" aria-hidden="true">🎸</span>
           <span class="title">Рок</span>
-          <span class="meta">Iron Horse</span>
+          <span class="meta">Hard Rock</span>
           <span class="status" data-status>загрузка…</span>
         </button>
       </div>
@@ -459,38 +441,27 @@
         <button class="player-btn" id="stopBtn" type="button">STOP</button>
       </div>
 
-      <div class="app-grid">
-        <div class="control-group">
-          <h2>Стерео баланс</h2>
-          <div class="slider-label">
-            <span class="channel-label" id="leftLabel">L</span>
-            <span class="slider-value" id="panValue">0.00</span>
-            <span class="channel-label" id="rightLabel">R</span>
-          </div>
-          <input type="range" min="-1" max="1" step="0.01" value="0" id="panRange" aria-label="Стерео баланс">
+      <div class="control-group pan-only">
+        <h2>Стерео баланс</h2>
+        <div class="slider-label">
+          <span class="channel-label" id="leftLabel">L</span>
+          <span class="slider-value" id="panValue">0.00</span>
+          <span class="channel-label" id="rightLabel">R</span>
         </div>
-
-        <div class="control-group">
-          <h3>Свой файл</h3>
-          <label class="file-upload-label" for="fileInput">
-            <span>Загрузить свой аудиофайл</span>
-            <span class="audio-info" id="audioInfo">необязательно, треки уже внутри</span>
-          </label>
-          <input type="file" id="fileInput" accept="audio/*">
-        </div>
+        <input type="range" min="-1" max="1" step="0.01" value="0" id="panRange" aria-label="Стерео баланс">
       </div>
     </section>
   </main>
 
   <footer class="footer">
-    <p>Kevin MacLeod, CC BY 3.0 · <a href="privacy.html">Конфиденциальность</a></p>
+    <p>Вивальди CC0 · Beat Doctor CC BY · Kevin MacLeod CC BY · <a href="privacy.html">Конфиденциальность</a></p>
   </footer>
 
   <script>
     const TRACKS = {
-      club: { id: 'club', title: 'Клубная', src: 'audio/club.mp3', credit: 'Club Diver — Kevin MacLeod' },
-      classical: { id: 'classical', title: 'Классика', src: 'audio/classical.mp3', credit: 'Air Prelude — Kevin MacLeod' },
-      rock: { id: 'rock', title: 'Рок', src: 'audio/rock.mp3', credit: 'Iron Horse — Kevin MacLeod' }
+      club: { id: 'club', title: 'Клубная', src: 'audio/club.mp3', credit: 'Alright — Beat Doctor' },
+      classical: { id: 'classical', title: 'Классика', src: 'audio/classical.mp3', credit: 'Вивальди — Весна, Allegro' },
+      rock: { id: 'rock', title: 'Рок', src: 'audio/rock.mp3', credit: 'Big Rock — Kevin MacLeod' }
     };
 
     const visualizer = document.getElementById('visualizer');
@@ -504,7 +475,6 @@
     const currentTimeEl = document.getElementById('currentTime');
     const durationTimeEl = document.getElementById('durationTime');
     const nowPlaying = document.getElementById('nowPlaying');
-    const audioInfo = document.getElementById('audioInfo');
     const leftLabel = document.getElementById('leftLabel');
     const rightLabel = document.getElementById('rightLabel');
     const particlesContainer = document.getElementById('particles');
@@ -517,7 +487,6 @@
     const isLowEnd = navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 2;
     const players = {};
     let activeId = 'club';
-    let customPlayer = null;
     let audioCtx, panNode, gainNode, analyser;
     let isPlaying = false;
     let animationId = null;
@@ -532,7 +501,6 @@
     };
 
     function currentPlayer() {
-      if (activeId === 'custom' && customPlayer) return customPlayer;
       return players[activeId];
     }
 
@@ -560,19 +528,15 @@
     }
 
     function updateNowPlaying() {
-      if (activeId === 'custom') {
-        nowPlaying.innerHTML = 'Выбрано: <strong>свой файл</strong>';
-        return;
-      }
       const track = TRACKS[activeId];
       nowPlaying.innerHTML = `Выбрано: <strong>${track.title}</strong> · ${track.credit}`;
     }
 
-    function createPlayer(src, useCors = true) {
+    function createPlayer(src) {
       const audio = new Audio();
       audio.preload = 'auto';
       audio.playsInline = true;
-      if (useCors) audio.crossOrigin = 'anonymous';
+      audio.crossOrigin = 'anonymous';
       audio.src = src;
       bindPlayer(audio);
       audio.load();
@@ -662,12 +626,12 @@
     async function selectTrack(id, autoplay) {
       const previous = currentPlayer();
       const wasPlaying = previous && !previous.paused;
-      if (previous && previous !== players[id] && !(id === 'custom' && previous === customPlayer)) {
+      if (previous && previous !== players[id]) {
         previous.pause();
         previous.currentTime = 0;
       }
       activeId = id;
-      highlightTrack(id === 'custom' ? '' : id);
+      highlightTrack(id);
       updateNowPlaying();
       const audio = currentPlayer();
       if (!audio) return;
@@ -767,12 +731,6 @@
       }
     }
 
-    function formatFileSize(bytes) {
-      if (bytes < 1024) return bytes + ' байт';
-      if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' КБ';
-      return (bytes / 1048576).toFixed(1) + ' МБ';
-    }
-
     Object.keys(TRACKS).forEach((id) => {
       const audio = createPlayer(TRACKS[id].src);
       audio.addEventListener('canplaythrough', () => setTrackStatus(id, 'готово', true), { once: true });
@@ -818,23 +776,6 @@
       if (panNode) panNode.pan.value = balance;
       panValue.textContent = balance.toFixed(2);
       updateColorsBasedOnBalance(balance);
-    });
-
-    document.getElementById('fileInput').addEventListener('change', async (event) => {
-      const file = event.target.files[0];
-      if (!file) return;
-      if (customPlayer) {
-        customPlayer.pause();
-        if (customPlayer.src.startsWith('blob:')) URL.revokeObjectURL(customPlayer.src);
-      }
-      customPlayer = createPlayer(URL.createObjectURL(file), false);
-      audioInfo.textContent = `${file.name} (${formatFileSize(file.size)})`;
-      await unlockAudio();
-      activeId = 'custom';
-      highlightTrack('');
-      updateNowPlaying();
-      ensureGraph(customPlayer);
-      customPlayer.play();
     });
 
     window.addEventListener('resize', () => {
