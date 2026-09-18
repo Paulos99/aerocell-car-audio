@@ -2,6 +2,14 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
+  <script>
+    (function () {
+      var path = location.pathname;
+      if (!path.endsWith('/') && !/\.html?$/i.test(path)) {
+        history.replaceState(null, '', path + '/' + location.search + location.hash);
+      }
+    })();
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="description" content="AEROCELL — стенд стерео-баланса с визуализацией и тремя предустановленными треками.">
   <meta name="theme-color" content="#b71c1c">
@@ -117,44 +125,42 @@
 
     .container {
       display: grid;
-      grid-template-columns: minmax(108px, 148px) minmax(0, 1fr);
-      grid-template-rows: minmax(0, 1fr) auto;
+      grid-template-columns: 132px minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr) auto auto;
       grid-template-areas:
         "tracks viz"
+        "tracks dock"
         "pan pan";
       width: min(1600px, 100%);
       height: 100%;
       min-height: 0;
       margin: 0 auto;
-      gap: 12px 16px;
+      gap: 10px 14px;
     }
 
     .track-rail {
       grid-area: tracks;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      gap: 12px;
+      display: grid;
+      grid-template-rows: repeat(3, minmax(0, 1fr));
+      gap: 10px;
       min-height: 0;
     }
 
     .track-btn {
       appearance: none;
-      flex: 1 1 0;
       width: 100%;
       min-height: 0;
       border: 2px solid var(--line);
       background: linear-gradient(180deg, #1a1a1a, #101010);
       color: var(--text-main);
-      border-radius: 22px;
-      padding: 8px;
+      border-radius: 20px;
+      padding: 8px 6px;
       cursor: pointer;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 4px;
-      transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+      gap: 6px;
     }
 
     .track-btn .icon { display: none; }
@@ -188,8 +194,7 @@
     .track-btn.active {
       border-color: var(--primary);
       background: linear-gradient(180deg, #b71c1c, #3a1010);
-      box-shadow: 0 0 0 2px rgba(229, 57, 53, 0.35), 0 10px 24px rgba(0, 0, 0, 0.35);
-      transform: translateY(-1px);
+      box-shadow: 0 0 0 2px rgba(229, 57, 53, 0.35);
     }
     .track-btn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 
@@ -197,46 +202,31 @@
       grid-area: viz;
       position: relative;
       min-height: 0;
-      border-radius: 24px;
+      border-radius: 20px;
       overflow: hidden;
       background: #050505;
       border: 1px solid rgba(229, 57, 53, 0.22);
-      box-shadow: inset 0 0 80px rgba(229, 57, 53, 0.08);
     }
 
     #visualizer {
-      position: relative;
-      z-index: 1;
       width: 100%;
       height: 100%;
       display: block;
     }
 
-    .viz-overlay {
-      position: absolute;
-      inset: 0;
-      z-index: 2;
-      pointer-events: none;
-      display: grid;
-      grid-template-rows: auto 1fr auto auto;
-      padding: 12px 16px 16px;
+    .player-dock {
+      grid-area: dock;
+      display: flex;
+      flex-direction: column;
       gap: 8px;
-    }
-
-    .now-playing {
-      margin: 0;
-      color: var(--text-secondary);
-      font-size: 0.78rem;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      pointer-events: none;
+      padding: 10px 14px 12px;
+      background: linear-gradient(180deg, rgba(22, 22, 22, 0.96), rgba(10, 10, 10, 0.96));
+      border: 1px solid rgba(229, 57, 53, 0.22);
+      border-radius: 18px;
       min-width: 0;
-      flex: 1;
-      text-shadow: 0 1px 8px #000;
     }
 
-    .viz-overlay .viz-top {
+    .dock-top {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -244,28 +234,39 @@
       min-width: 0;
     }
 
-    #seekRange {
-      pointer-events: auto;
-      height: 28px;
-      width: 100%;
-      justify-self: stretch;
-      align-self: end;
+    .now-playing {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
     }
 
     .times {
       flex-shrink: 0;
       font-variant-numeric: tabular-nums;
-      font-size: 0.72rem;
+      font-size: 0.8rem;
       color: var(--text-secondary);
-      text-shadow: 0 1px 8px #000;
+    }
+
+    .seek-row {
+      display: flex;
+      align-items: center;
+      min-height: 28px;
+    }
+
+    #seekRange {
+      width: 100%;
+      height: 28px;
     }
 
     .transport {
-      pointer-events: auto;
-      justify-self: center;
       display: flex;
       align-items: center;
-      gap: 18px;
+      justify-content: center;
+      gap: 16px;
     }
 
     .icon-btn {
@@ -463,18 +464,18 @@
     @media (orientation: portrait) and (max-width: 900px) {
       .container {
         grid-template-columns: 1fr;
-        grid-template-rows: auto minmax(0, 1fr) auto;
+        grid-template-rows: auto minmax(0, 1fr) auto auto;
         grid-template-areas:
           "tracks"
           "viz"
+          "dock"
           "pan";
         gap: 10px;
       }
 
       .track-rail {
-        flex-direction: row;
-        justify-content: stretch;
-        gap: 10px;
+        grid-template-rows: 1fr;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
 
       .track-btn {
@@ -536,24 +537,26 @@
 
     <section class="visualizer-stage" aria-label="Аудио визуализатор">
       <canvas id="visualizer"></canvas>
-      <div class="viz-overlay">
-        <div class="viz-top">
-          <div class="now-playing" id="nowPlaying">Клубная</div>
-          <div class="times"><span id="currentTime">0:00</span> / <span id="durationTime">0:00</span></div>
-        </div>
-        <div></div>
+    </section>
+
+    <section class="player-dock">
+      <div class="dock-top">
+        <div class="now-playing" id="nowPlaying">Клубная</div>
+        <div class="times"><span id="currentTime">0:00</span> / <span id="durationTime">0:00</span></div>
+      </div>
+      <div class="seek-row">
         <input type="range" id="seekRange" min="0" max="1000" value="0" step="1" aria-label="Позиция трека">
-        <div class="transport">
-          <button class="icon-btn primary" id="playBtn" type="button" aria-label="Play">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
-          </button>
-          <button class="icon-btn" id="pauseBtn" type="button" aria-label="Pause">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
-          </button>
-          <button class="icon-btn" id="stopBtn" type="button" aria-label="Stop">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h12v12H6z"/></svg>
-          </button>
-        </div>
+      </div>
+      <div class="transport">
+        <button class="icon-btn primary" id="playBtn" type="button" aria-label="Play">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <button class="icon-btn" id="pauseBtn" type="button" aria-label="Pause">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
+        </button>
+        <button class="icon-btn" id="stopBtn" type="button" aria-label="Stop">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h12v12H6z"/></svg>
+        </button>
       </div>
     </section>
 
@@ -569,6 +572,12 @@
       </div>
     </section>
   </main>
+
+  <div class="audio-bank" hidden>
+    <audio id="audio-club" src="audio/club.mp3" preload="auto" playsinline></audio>
+    <audio id="audio-classical" src="audio/classical.mp3" preload="auto" playsinline></audio>
+    <audio id="audio-rock" src="audio/rock.mp3" preload="auto" playsinline></audio>
+  </div>
 
   <script>
     const TRACKS = {
@@ -660,13 +669,13 @@
       setPlayingState(false);
     }
 
-    function createPlayer(src) {
-      const audio = new Audio();
+    function createPlayer(id) {
+      const audio = document.getElementById(`audio-${id}`);
       audio.preload = 'auto';
+      audio.setAttribute('playsinline', '');
       audio.playsInline = true;
-      audio.src = src;
       bindPlayer(audio);
-      audio.load();
+      try { audio.load(); } catch (error) { /* ignore */ }
       return audio;
     }
 
@@ -713,6 +722,7 @@
         panNode.connect(audioCtx.destination);
         viz.raw = new Uint8Array(analyser.fftSize);
       }
+      if (audioCtx.state === 'suspended') audioCtx.resume();
       if (!sources.has(audio)) {
         const source = audioCtx.createMediaElementSource(audio);
         source.connect(gainNode);
@@ -720,47 +730,26 @@
       }
     }
 
-    async function resumeContext() {
-      if (audioCtx && audioCtx.state === 'suspended') {
-        await audioCtx.resume();
-      }
-    }
-
-    function waitForCanPlay(audio) {
-      if (audio.readyState >= 2) return Promise.resolve();
-      return new Promise((resolve) => {
-        const done = () => resolve();
-        audio.addEventListener('canplay', done, { once: true });
-        audio.addEventListener('loadeddata', done, { once: true });
-        window.setTimeout(done, 2500);
-      });
-    }
-
-    async function playActive() {
+    function playActive() {
       const audio = currentPlayer();
       if (!audio) return;
       ensureGraph(audio);
-      await resumeContext();
-      await waitForCanPlay(audio);
-      try {
-        await audio.play();
-        setPlayingState(true);
-        syncProgress(audio);
-      } catch (error) {
-        console.warn('play blocked', error);
+      const result = audio.play();
+      if (result && typeof result.catch === 'function') {
+        result.catch((error) => console.warn('play blocked', error));
       }
     }
 
-    async function selectTrack(id, autoplay) {
+    function selectTrack(id, autoplay) {
       stopAll(true);
       activeId = id;
       highlightTrack(id);
       updateNowPlaying();
       const audio = currentPlayer();
       if (!audio) return;
-      audio.currentTime = 0;
+      try { audio.currentTime = 0; } catch (error) { /* ignore */ }
       syncProgress(audio);
-      if (autoplay) await playActive();
+      if (autoplay) playActive();
     }
 
     function initVisualizer() {
@@ -934,12 +923,12 @@
     }
 
     Object.keys(TRACKS).forEach((id) => {
-      players[id] = createPlayer(TRACKS[id].src);
+      players[id] = createPlayer(id);
     });
 
     document.querySelectorAll('.track-btn').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        await selectTrack(btn.dataset.track, true);
+      btn.addEventListener('click', () => {
+        selectTrack(btn.dataset.track, true);
       });
     });
 
@@ -1010,7 +999,10 @@
       window.addEventListener('load', () => {
         const base = window.location.href.endsWith('/') ? window.location.href : `${window.location.href}/`;
         const swUrl = new URL('sw.js', base);
-        navigator.serviceWorker.register(swUrl.href, { scope: new URL('./', swUrl).href });
+        navigator.serviceWorker.register(swUrl.href, {
+          scope: new URL('./', swUrl).href,
+          updateViaCache: 'none'
+        });
       });
     }
 

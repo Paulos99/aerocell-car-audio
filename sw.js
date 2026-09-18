@@ -1,4 +1,4 @@
-const CACHE = 'aerocell-v6';
+const CACHE = 'aerocell-v7';
 const SHELL = [
   './',
   './index.html',
@@ -24,7 +24,10 @@ self.addEventListener('install', (event) => {
     await cache.addAll(SHELL);
     await Promise.all(AUDIO.map(async (url) => {
       try {
-        await cache.add(url);
+        const response = await fetch(url, { cache: 'reload' });
+        if (response.ok && response.status === 200) {
+          await cache.put(url, response);
+        }
       } catch (error) {
         console.warn('audio precache skipped', url, error);
       }
@@ -49,14 +52,39 @@ function isSameOrigin(request) {
   }
 }
 
-async function respondWithRange(request, cached) {
-  const rangeHeader = request.headers.get('range');
-  if (!rangeHeader || !cached) return cached;
+async function matchFullAudio(url) {
+  const cache = await caches.open(CACHE);
+  const candidates = [
+    url.href,
+    url.pathname,
+    `./audio/${url.pathname.split('/').pop()}`,
+    `/aerocell-car-audio/audio/${url.pathname.split('/').pop()}`
+  ];
+  for (const key of candidates) {
+    const hit = await cache.match(key, { ignoreSearch: true, ignoreVary: true });
+    if (!hit) continue;
+    const clone = hit.clone();
+    const blob = await clone.blob();
+    if (blob.size > 80000) return hit;
+  }
+  return null;
+}
 
+async function respondWithRange(request, cached) {
   const blob = await cached.blob();
   const size = blob.size;
-  const match = /bytes=(\d*)-(\d*)/.exec(rangeHeader);
-  if (!match) return cached;
+  const rangeHeader = request.headers.get('range');
+  const match = /bytes=(\d*)-(\d*)/.exec(rangeHeader || '');
+  if (!match) {
+    return new Response(blob, {
+      status: 200,
+      headers: {
+        'Content-Type': 'audio/mpeg',
+        'Content-Length': String(size),
+        'Accept-Ranges': 'bytes'
+      }
+    });
+  }
 
   const start = match[1] ? Number(match[1]) : 0;
   const end = match[2] ? Number(match[2]) : size - 1;
@@ -71,7 +99,7 @@ async function respondWithRange(request, cached) {
   return new Response(slice, {
     status: 206,
     headers: {
-      'Content-Type': cached.headers.get('Content-Type') || 'audio/mpeg',
+      'Content-Type': 'audio/mpeg',
       'Content-Length': String(slice.size),
       'Content-Range': `bytes ${start}-${end}/${size}`,
       'Accept-Ranges': 'bytes'
@@ -83,29 +111,27 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET' || !isSameOrigin(request)) return;
 
+  const url = new URL(request.url);
+  const isAudio = /\.mp3$/i.test(url.pathname);
+
+  if (isAudio) {
+    event.respondWith((async () => {
+      try {
+        const fresh = await fetch(request);
+        if (fresh && (fresh.status === 200 || fresh.status === 206)) return fresh;
+      } catch {
+        /* offline: fall through to cache */
+      }
+      const cached = await matchFullAudio(url);
+      if (!cached) throw new Error('audio miss');
+      return request.headers.has('range') ? respondWithRange(request, cached) : respondWithRange(new Request(url.href), cached);
+    })());
+    return;
+  }
+
   event.respondWith((async () => {
-    const url = new URL(request.url);
-    const isAudio = /\.mp3$/i.test(url.pathname);
-    const cached = await caches.match(url.href, { ignoreSearch: true });
-
-    if (isAudio) {
-      if (cached) {
-        if (request.headers.has('range')) return respondWithRange(request, cached);
-        const headers = new Headers(cached.headers);
-        headers.set('Accept-Ranges', 'bytes');
-        headers.set('Content-Type', cached.headers.get('Content-Type') || 'audio/mpeg');
-        return new Response(cached.body, { status: 200, headers });
-      }
-      const response = await fetch(request);
-      if (response.ok) {
-        const cache = await caches.open(CACHE);
-        cache.put(url.href, response.clone());
-      }
-      return response;
-    }
-
+    const cached = await caches.match(request, { ignoreSearch: true });
     if (cached) return cached;
-
     try {
       const response = await fetch(request);
       if (response && response.ok && response.type === 'basic' && response.status === 200) {
