@@ -1,5 +1,11 @@
 package com.aerocell.stand.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -27,16 +33,22 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,6 +62,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -71,6 +84,7 @@ import com.aerocell.stand.ui.theme.AeroRedGlow
 import com.aerocell.stand.ui.theme.AeroSilver
 import com.aerocell.stand.ui.theme.AeroTrackDim
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 @Composable
 fun StandScreen(
@@ -91,9 +105,9 @@ fun StandScreen(
         Canvas(modifier = Modifier.fillMaxSize()) {
             drawRect(
                 brush = Brush.radialGradient(
-                    colors = listOf(Color(0x33FF1A1A), Color.Transparent),
-                    center = Offset(size.width * 0.5f, size.height * 0.28f),
-                    radius = size.minDimension * 0.72f
+                    colors = listOf(Color(0x28FF1A1A), Color.Transparent),
+                    center = Offset(size.width * 0.5f, size.height * 0.3f),
+                    radius = size.minDimension * 0.7f
                 )
             )
         }
@@ -104,16 +118,15 @@ fun StandScreen(
                 .padding(horizontal = 20.dp, vertical = 10.dp)
         ) {
             Header()
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(4.dp))
             ComparisonStage(
                 playing = state.playing,
                 waveform = state.waveform,
-                clockMs = state.positionMs,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             BalanceRow(
                 pan = state.pan,
                 onPan = onPan,
@@ -129,78 +142,24 @@ fun StandScreen(
                 onStop = onStop,
                 onVolume = onVolume
             )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "ТИШЕ  ДВИЖЕНИЕ  ДАЛЬШЕ",
-                color = Color.White.copy(alpha = 0.72f),
-                fontSize = 11.sp,
-                letterSpacing = 4.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
         }
     }
 }
 
 @Composable
 private fun Header() {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = "ХОРОШИЕ АВТОМОБИЛИ\nЛУЧШИЕ ЛЮДИ",
-            color = Color.White.copy(alpha = 0.88f),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
-            letterSpacing = 1.2.sp,
-            lineHeight = 14.sp,
-            modifier = Modifier.weight(1f)
+        Image(
+            painter = painterResource(R.drawable.aerocell_qp_logo),
+            contentDescription = "aerocell QP",
+            modifier = Modifier.height(48.dp),
+            contentScale = ContentScale.Fit
         )
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-            modifier = Modifier.weight(1.2f)
-        ) {
-            Image(
-                painter = painterResource(R.drawable.stp_logo),
-                contentDescription = "StP",
-                modifier = Modifier.height(36.dp),
-                contentScale = ContentScale.Fit
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = "AEROCELL",
-                color = AeroRedGlow,
-                fontWeight = FontWeight.Black,
-                fontSize = 28.sp,
-                letterSpacing = 3.sp,
-                modifier = Modifier.shadow(12.dp, spotColor = AeroRed, ambientColor = AeroRed)
-            )
-        }
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.End
-        ) {
-            Text(
-                text = "АКУСТИЧЕСКИЙ КОМФОРТ\nВ ДВИЖЕНИИ ВЕЗДЕ",
-                color = Color.White.copy(alpha = 0.88f),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 1.2.sp,
-                lineHeight = 14.sp,
-                textAlign = TextAlign.End,
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(Modifier.width(8.dp))
-            Icon(
-                imageVector = Icons.Filled.Settings,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.75f),
-                modifier = Modifier.size(22.dp)
-            )
-        }
     }
 }
 
@@ -208,23 +167,35 @@ private fun Header() {
 private fun ComparisonStage(
     playing: Boolean,
     waveform: ByteArray,
-    clockMs: Int,
     modifier: Modifier = Modifier
 ) {
+    val bassPulse = rememberBassPulse(playing, waveform)
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Image(
-            painter = painterResource(R.drawable.speaker_left),
-            contentDescription = "Короб AEROCELL",
+        Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
                 .padding(end = 4.dp),
-            contentScale = ContentScale.Fit
-        )
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                painter = painterResource(R.drawable.speaker_left),
+                contentDescription = "Короб AEROCELL",
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val s = 1f + bassPulse * 0.055f
+                        scaleX = s
+                        scaleY = s
+                        alpha = 0.92f + bassPulse * 0.08f
+                    },
+                contentScale = ContentScale.Fit
+            )
+        }
         Column(
             modifier = Modifier
                 .weight(1.15f)
@@ -249,75 +220,144 @@ private fun ComparisonStage(
             SingleWave(
                 playing = playing,
                 waveform = waveform,
-                clockMs = clockMs,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(88.dp)
+                    .height(100.dp)
             )
         }
-        Image(
-            painter = painterResource(R.drawable.speaker_right),
-            contentDescription = "Короб без обработки",
+        Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
                 .padding(start = 4.dp),
-            contentScale = ContentScale.Fit
-        )
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                painter = painterResource(R.drawable.speaker_right),
+                contentDescription = "Короб без обработки",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit
+            )
+        }
     }
+}
+
+@Composable
+private fun rememberBassPulse(playing: Boolean, waveform: ByteArray): Float {
+    var smoothed by remember { mutableFloatStateOf(0f) }
+    val latestWave = rememberUpdatedState(waveform)
+    val latestPlaying = rememberUpdatedState(playing)
+    LaunchedEffect(Unit) {
+        while (true) {
+            withFrameMillis {
+                if (!latestPlaying.value) {
+                    smoothed += (0f - smoothed) * 0.2f
+                } else {
+                    val wave = latestWave.value
+                    if (wave.isEmpty()) {
+                        smoothed += (0f - smoothed) * 0.2f
+                    } else {
+                        var sum = 0.0
+                        val step = (wave.size / 64).coerceAtLeast(1)
+                        var count = 0
+                        var i = 0
+                        while (i < wave.size) {
+                            val v = ((wave[i].toInt() and 0xFF) - 128) / 128.0
+                            sum += v * v
+                            count++
+                            i += step
+                        }
+                        val rms = if (count == 0) 0f else sqrt(sum / count).toFloat()
+                        val target = (rms * 2.4f).coerceIn(0f, 1f)
+                        smoothed += (target - smoothed) * 0.28f
+                    }
+                }
+            }
+        }
+    }
+    return smoothed
 }
 
 @Composable
 private fun SingleWave(
     playing: Boolean,
     waveform: ByteArray,
-    clockMs: Int,
     modifier: Modifier = Modifier
 ) {
+    var phase by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(Unit) {
+        var last = 0L
+        while (true) {
+            withFrameMillis { now ->
+                if (last != 0L) {
+                    val dt = ((now - last).coerceAtMost(40)) / 1000f
+                    phase += dt * if (playing) 2.4f else 1.15f
+                }
+                last = now
+            }
+        }
+    }
     Canvas(modifier = modifier) {
-        val samples = waveSamples(waveform, playing, clockMs)
-        drawWaveBold(samples)
+        val samples = waveSamples(waveform, playing, phase)
+        drawWaveBold(samples, playing, phase)
     }
 }
 
-private fun waveSamples(waveform: ByteArray, playing: Boolean, clockMs: Int): FloatArray {
-    val n = 120
+private fun waveSamples(waveform: ByteArray, playing: Boolean, phase: Float): FloatArray {
+    val n = 140
     val out = FloatArray(n)
     if (playing && waveform.size >= n) {
         val step = waveform.size / n.toFloat()
         for (i in 0 until n) {
             val idx = (i * step).toInt() % waveform.size
-            out[i] = ((waveform[idx].toInt() and 0xFF) - 128) / 128f
+            val raw = ((waveform[idx].toInt() and 0xFF) - 128) / 128f
+            val x = i / (n - 1f)
+            val shimmer = sin((x * 10f + phase * 2.2f) * Math.PI).toFloat() * 0.08f
+            out[i] = (raw * 0.95f + shimmer).coerceIn(-1f, 1f)
         }
         return out
     }
-    val t = clockMs / 900f
+    val breath = 0.55f + 0.45f * sin(phase * 0.9).toFloat()
     for (i in 0 until n) {
         val x = i / (n - 1f)
-        val envelope = 0.35f + 0.65f * sin(x * Math.PI).toFloat()
+        val envelope = (0.25f + 0.75f * sin(x * Math.PI).toFloat()) * breath
         out[i] = (
-            sin((x * 8.5 + t * 1.8) * Math.PI) * 0.55 +
-                sin((x * 17.0 + t * 2.4) * Math.PI) * 0.28 +
-                sin((x * 31.0 + t * 3.1) * Math.PI) * 0.12
-            ).toFloat() * envelope * 0.55f
+            sin((x * 7.2 + phase * 1.6) * Math.PI) * 0.5 +
+                sin((x * 14.5 + phase * 2.1) * Math.PI) * 0.28 +
+                sin((x * 28.0 + phase * 2.8) * Math.PI) * 0.14 +
+                sin((x * 42.0 + phase * 3.4) * Math.PI) * 0.07
+            ).toFloat() * envelope * 0.62f
     }
     return out
 }
 
-private fun DrawScope.drawWaveBold(samples: FloatArray) {
+private fun DrawScope.drawWaveBold(samples: FloatArray, playing: Boolean, phase: Float) {
     if (samples.isEmpty()) return
     val path = Path()
     val last = samples.lastIndex.coerceAtLeast(1)
     val midY = size.height / 2f
-    val amp = size.height * 0.42f
+    val amp = size.height * if (playing) 0.46f else 0.38f
     samples.forEachIndexed { i, sample ->
         val x = size.width * i / last
         val y = midY + sample * amp
         if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
     }
-    drawPath(path, AeroRed.copy(alpha = 0.22f), style = Stroke(width = 22f, cap = StrokeCap.Round))
-    drawPath(path, AeroRedGlow.copy(alpha = 0.55f), style = Stroke(width = 10f, cap = StrokeCap.Round))
-    drawPath(path, Color.White.copy(alpha = 0.92f), style = Stroke(width = 2.4f, cap = StrokeCap.Round))
+    val pulse = (0.75f + 0.25f * sin(phase * 2.0).toFloat())
+    drawPath(
+        path,
+        AeroRed.copy(alpha = 0.18f * pulse),
+        style = Stroke(width = if (playing) 28f else 20f, cap = StrokeCap.Round)
+    )
+    drawPath(
+        path,
+        AeroRedGlow.copy(alpha = 0.5f * pulse),
+        style = Stroke(width = if (playing) 12f else 9f, cap = StrokeCap.Round)
+    )
+    drawPath(
+        path,
+        Color.White.copy(alpha = 0.95f),
+        style = Stroke(width = if (playing) 2.8f else 2.2f, cap = StrokeCap.Round)
+    )
 }
 
 @Composable
@@ -326,30 +366,51 @@ private fun BalanceRow(
     onPan: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = modifier.height(56.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        BalanceLabel(
-            letter = "L",
-            title = "Короб с обработкой",
-            accent = "AEROCELL",
-            modifier = Modifier.widthIn(min = 170.dp).weight(0.9f)
-        )
-        BalanceFader(
-            pan = pan,
-            onPan = onPan,
+    Column(modifier = modifier) {
+        Text(
+            text = "БАЛАНС",
+            color = AeroMuted,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 4.sp,
+            textAlign = TextAlign.Center,
             modifier = Modifier
-                .weight(1.4f)
-                .fillMaxHeight()
+                .fillMaxWidth()
+                .padding(bottom = 6.dp)
         )
-        BalanceLabel(
-            letter = "R",
-            title = "Короб без обработки",
-            accent = null,
-            modifier = Modifier.widthIn(min = 170.dp).weight(0.9f)
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            BalanceLabel(
+                letter = "L",
+                title = "Короб с обработкой",
+                accent = "AEROCELL",
+                alignEnd = false,
+                modifier = Modifier
+                    .widthIn(min = 170.dp)
+                    .weight(0.9f)
+            )
+            BalanceFader(
+                pan = pan,
+                onPan = onPan,
+                modifier = Modifier
+                    .weight(1.4f)
+                    .fillMaxHeight()
+            )
+            BalanceLabel(
+                letter = "R",
+                title = "Короб без обработки",
+                accent = null,
+                alignEnd = true,
+                modifier = Modifier
+                    .widthIn(min = 170.dp)
+                    .weight(0.9f)
+            )
+        }
     }
 }
 
@@ -358,6 +419,7 @@ private fun BalanceLabel(
     letter: String,
     title: String,
     accent: String?,
+    alignEnd: Boolean,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -366,33 +428,52 @@ private fun BalanceLabel(
             .background(AeroPanelSoft)
             .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start
     ) {
+        if (!alignEnd) {
+            LetterBadge(letter)
+            Spacer(Modifier.width(10.dp))
+            LabelTexts(title, accent, TextAlign.Start)
+        } else {
+            LabelTexts(title, accent, TextAlign.End)
+            Spacer(Modifier.width(10.dp))
+            LetterBadge(letter)
+        }
+    }
+}
+
+@Composable
+private fun LetterBadge(letter: String) {
+    Text(
+        text = letter,
+        color = AeroRedGlow,
+        fontWeight = FontWeight.Black,
+        fontSize = 28.sp,
+        modifier = Modifier.shadow(8.dp, spotColor = AeroRed, ambientColor = AeroRed)
+    )
+}
+
+@Composable
+private fun LabelTexts(title: String, accent: String?, align: TextAlign) {
+    Column(horizontalAlignment = if (align == TextAlign.End) Alignment.End else Alignment.Start) {
         Text(
-            text = letter,
-            color = AeroRedGlow,
-            fontWeight = FontWeight.Black,
-            fontSize = 28.sp,
-            modifier = Modifier.shadow(8.dp, spotColor = AeroRed, ambientColor = AeroRed)
+            text = title,
+            color = Color.White.copy(alpha = 0.9f),
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = align
         )
-        Spacer(Modifier.width(10.dp))
-        Column {
+        if (accent != null) {
             Text(
-                text = title,
-                color = Color.White.copy(alpha = 0.9f),
+                text = accent,
+                color = AeroRedGlow,
+                fontWeight = FontWeight.Bold,
                 fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                letterSpacing = 1.sp,
+                textAlign = align
             )
-            if (accent != null) {
-                Text(
-                    text = accent,
-                    color = AeroRedGlow,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    letterSpacing = 1.sp
-                )
-            }
         }
     }
 }
@@ -403,6 +484,27 @@ private fun BalanceFader(
     onPan: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var dragging by remember { mutableStateOf(false) }
+    val infinite = rememberInfiniteTransition(label = "balanceInvite")
+    val invitePan by infinite.animateFloat(
+        initialValue = -0.38f,
+        targetValue = 0.38f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "invitePan"
+    )
+    val invitePulse by infinite.animateFloat(
+        initialValue = 0.85f,
+        targetValue = 1.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "invitePulse"
+    )
+    val visualPan = if (dragging) pan else invitePan
     val latest = rememberUpdatedState(onPan)
     Box(
         modifier = modifier.pointerInput(Unit) {
@@ -412,11 +514,13 @@ private fun BalanceFader(
             }
             awaitEachGesture {
                 val down = awaitFirstDown()
+                dragging = true
                 emit(down.position.x)
                 drag(down.id) { change ->
                     emit(change.position.x)
                     change.consume()
                 }
+                dragging = false
             }
         },
         contentAlignment = Alignment.Center
@@ -425,8 +529,9 @@ private fun BalanceFader(
             val trackH = 4.dp.toPx()
             val y = size.height / 2f
             val mid = size.width / 2f
-            val t = ((pan + 1f) / 2f).coerceIn(0f, 1f)
+            val t = ((visualPan + 1f) / 2f).coerceIn(0f, 1f)
             val thumbX = t * size.width
+            val pulse = if (dragging) 1f else invitePulse
             drawRoundRect(
                 color = AeroTrackDim,
                 topLeft = Offset(0f, y - trackH / 2f),
@@ -445,11 +550,19 @@ private fun BalanceFader(
                 end = Offset(mid, y + 14.dp.toPx()),
                 strokeWidth = 1.5f
             )
-            drawCircle(color = AeroRed.copy(alpha = 0.35f), radius = 18.dp.toPx(), center = Offset(thumbX, y))
-            drawCircle(color = AeroSilver, radius = 11.dp.toPx(), center = Offset(thumbX, y))
+            drawCircle(
+                color = AeroRed.copy(alpha = 0.28f * pulse),
+                radius = 18.dp.toPx() * pulse,
+                center = Offset(thumbX, y)
+            )
+            drawCircle(
+                color = AeroSilver,
+                radius = 11.dp.toPx() * (0.92f + 0.08f * pulse),
+                center = Offset(thumbX, y)
+            )
             drawCircle(
                 color = AeroRedGlow,
-                radius = 11.dp.toPx(),
+                radius = 11.dp.toPx() * (0.92f + 0.08f * pulse),
                 center = Offset(thumbX, y),
                 style = Stroke(width = 3.dp.toPx())
             )
@@ -498,11 +611,7 @@ private fun BottomBar(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            CircleControl(
-                size = 42.dp,
-                filled = false,
-                onClick = onPrevious
-            ) {
+            CircleControl(size = 42.dp, filled = false, onClick = onPrevious) {
                 Icon(
                     imageVector = Icons.Filled.SkipPrevious,
                     contentDescription = "Предыдущий",
@@ -524,11 +633,7 @@ private fun BottomBar(
                 )
             }
             Spacer(Modifier.width(14.dp))
-            CircleControl(
-                size = 42.dp,
-                filled = false,
-                onClick = onStop
-            ) {
+            CircleControl(size = 42.dp, filled = false, onClick = onStop) {
                 Icon(
                     imageVector = Icons.Filled.Stop,
                     contentDescription = "Стоп",
