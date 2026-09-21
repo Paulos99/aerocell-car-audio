@@ -64,6 +64,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -119,12 +120,11 @@ fun StandScreen(
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(horizontal = 20.dp, vertical = 10.dp)
         ) {
-            Header()
-            Spacer(Modifier.height(4.dp))
+            // Reserve only a slim top gap — logo is drawn in an overlay above everything
+            Spacer(Modifier.height(28.dp))
             ComparisonStage(
                 playing = state.playing,
                 waveform = state.waveform,
-                midEnergy = state.midEnergy,
                 pan = state.pan,
                 modifier = Modifier
                     .weight(1f)
@@ -147,22 +147,17 @@ fun StandScreen(
                 onVolume = onVolume
             )
         }
-    }
-}
-
-@Composable
-private fun Header() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(195.dp)
-            .padding(horizontal = 12.dp, vertical = 2.dp),
-        contentAlignment = Alignment.Center
-    ) {
+        // Logo on top of all layers; size ~2.5× previous (~78.dp → ~195.dp)
         Image(
             painter = painterResource(R.drawable.aerocell_qp_logo),
             contentDescription = "aerocell QP",
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(top = 4.dp)
+                .fillMaxWidth(0.92f)
+                .height(195.dp)
+                .zIndex(10f),
             contentScale = ContentScale.Fit
         )
     }
@@ -172,19 +167,15 @@ private fun Header() {
 private fun ComparisonStage(
     playing: Boolean,
     waveform: ByteArray,
-    midEnergy: Float,
     pan: Float,
     modifier: Modifier = Modifier
 ) {
     val bassPulse = rememberBassPulse(playing, waveform)
-    val midPulse = rememberMidPulse(playing, midEnergy)
     val leftLevel = if (pan <= 0f) 1f else 1f - pan
     val rightLevel = if (pan >= 0f) 1f else 1f + pan
     // Left = untreated (2x weaker), Right = AEROCELL
-    val leftBass = bassPulse * leftLevel * 0.5f
-    val rightBass = bassPulse * rightLevel
-    val leftGlow = midPulse * leftLevel * 0.5f
-    val rightGlow = midPulse * rightLevel
+    val leftPulse = bassPulse * leftLevel * 0.5f
+    val rightPulse = bassPulse * rightLevel
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
@@ -193,9 +184,8 @@ private fun ComparisonStage(
         PulsingSpeaker(
             resId = R.drawable.speaker_untreated,
             contentDescription = "Короб без обработки",
-            bassPulse = leftBass,
-            glowPulse = leftGlow,
-            glowStrength = 0.75f,
+            pulse = leftPulse,
+            glowStrength = 0.55f,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
@@ -233,9 +223,8 @@ private fun ComparisonStage(
         PulsingSpeaker(
             resId = R.drawable.speaker_aerocell,
             contentDescription = "Короб AEROCELL",
-            bassPulse = rightBass,
-            glowPulse = rightGlow,
-            glowStrength = 1.15f,
+            pulse = rightPulse,
+            glowStrength = 1f,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
@@ -248,8 +237,7 @@ private fun ComparisonStage(
 private fun PulsingSpeaker(
     resId: Int,
     contentDescription: String,
-    bassPulse: Float,
-    glowPulse: Float,
+    pulse: Float,
     glowStrength: Float,
     modifier: Modifier = Modifier
 ) {
@@ -257,29 +245,24 @@ private fun PulsingSpeaker(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        // Glow sits behind the enclosure and blooms with mid energy
+        // Glow strictly behind the enclosure — bright logo-style red haze
         Canvas(
             modifier = Modifier
                 .fillMaxSize(0.98f)
-                .graphicsLayer { alpha = 1f }
+                .zIndex(0f)
         ) {
-            val intensity = (0.35f + glowPulse * 0.85f) * glowStrength
-            val radius = size.minDimension * (0.48f + glowPulse * 0.12f)
-            // offset slightly back/down so light reads as behind the box
-            val center = Offset(size.width * 0.5f, size.height * 0.52f)
+            val base = (0.42f + pulse * 0.55f) * glowStrength
+            val r = size.minDimension * (0.48f + pulse * 0.08f)
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        Color(0xFFFF3B3B).copy(alpha = (intensity * 0.95f).coerceAtMost(1f)),
-                        AeroRed.copy(alpha = (intensity * 0.55f).coerceAtMost(1f)),
-                        AeroRedDark.copy(alpha = (intensity * 0.22f).coerceAtMost(1f)),
+                        Color(0xFFFF3A3A).copy(alpha = (base * 0.95f).coerceIn(0f, 0.95f)),
+                        Color(0xFFE53935).copy(alpha = (base * 0.55f).coerceIn(0f, 0.7f)),
+                        Color(0xFFB00000).copy(alpha = (base * 0.22f).coerceIn(0f, 0.4f)),
                         Color.Transparent
-                    ),
-                    center = center,
-                    radius = radius
+                    )
                 ),
-                radius = radius,
-                center = center
+                radius = r
             )
         }
         Image(
@@ -287,8 +270,9 @@ private fun PulsingSpeaker(
             contentDescription = contentDescription,
             modifier = Modifier
                 .fillMaxSize()
+                .zIndex(1f)
                 .graphicsLayer {
-                    val s = 1f + bassPulse * 0.06f
+                    val s = 1f + pulse * 0.06f
                     scaleX = s
                     scaleY = s
                 },
@@ -327,22 +311,6 @@ private fun rememberBassPulse(playing: Boolean, waveform: ByteArray): Float {
                         smoothed += (target - smoothed) * 0.28f
                     }
                 }
-            }
-        }
-    }
-    return smoothed
-}
-
-@Composable
-private fun rememberMidPulse(playing: Boolean, midEnergy: Float): Float {
-    var smoothed by remember { mutableFloatStateOf(0f) }
-    val latestMid = rememberUpdatedState(midEnergy)
-    val latestPlaying = rememberUpdatedState(playing)
-    LaunchedEffect(Unit) {
-        while (true) {
-            withFrameMillis {
-                val target = if (latestPlaying.value) latestMid.value.coerceIn(0f, 1f) else 0f
-                smoothed += (target - smoothed) * 0.32f
             }
         }
     }
