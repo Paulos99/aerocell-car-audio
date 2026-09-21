@@ -124,6 +124,7 @@ fun StandScreen(
             ComparisonStage(
                 playing = state.playing,
                 waveform = state.waveform,
+                pan = state.pan,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -150,17 +151,33 @@ fun StandScreen(
 
 @Composable
 private fun Header() {
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp),
-        contentAlignment = Alignment.Center
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Image(
-            painter = painterResource(R.drawable.aerocell_qp_logo),
-            contentDescription = "aerocell QP",
-            modifier = Modifier.height(48.dp),
-            contentScale = ContentScale.Fit
+        val logoBrush = Brush.verticalGradient(
+            colors = listOf(Color(0xFFFF5555), Color(0xFFE53935), Color(0xFF9A0000))
+        )
+        Text(
+            text = "aerocell",
+            style = androidx.compose.ui.text.TextStyle(
+                brush = logoBrush,
+                fontWeight = FontWeight.Bold,
+                fontSize = 22.sp,
+                letterSpacing = 1.5.sp
+            )
+        )
+        Text(
+            text = "QP",
+            style = androidx.compose.ui.text.TextStyle(
+                brush = logoBrush,
+                fontWeight = FontWeight.Black,
+                fontSize = 36.sp,
+                letterSpacing = 2.sp
+            ),
+            modifier = Modifier.shadow(16.dp, spotColor = AeroRed, ambientColor = AeroRed)
         )
     }
 }
@@ -169,35 +186,30 @@ private fun Header() {
 private fun ComparisonStage(
     playing: Boolean,
     waveform: ByteArray,
+    pan: Float,
     modifier: Modifier = Modifier
 ) {
     val bassPulse = rememberBassPulse(playing, waveform)
+    val leftLevel = if (pan <= 0f) 1f else 1f - pan
+    val rightLevel = if (pan >= 0f) 1f else 1f + pan
+    // Left = untreated (2x weaker), Right = AEROCELL
+    val leftPulse = bassPulse * leftLevel * 0.5f
+    val rightPulse = bassPulse * rightLevel
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Box(
+        PulsingSpeaker(
+            resId = R.drawable.speaker_untreated,
+            contentDescription = "Короб без обработки",
+            pulse = leftPulse,
+            glowStrength = 0.55f,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
-                .padding(end = 4.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Image(
-                painter = painterResource(R.drawable.speaker_left),
-                contentDescription = "Короб AEROCELL",
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val s = 1f + bassPulse * 0.055f
-                        scaleX = s
-                        scaleY = s
-                        alpha = 0.92f + bassPulse * 0.08f
-                    },
-                contentScale = ContentScale.Fit
-            )
-        }
+                .padding(end = 4.dp)
+        )
         Column(
             modifier = Modifier
                 .weight(1.15f)
@@ -227,20 +239,56 @@ private fun ComparisonStage(
                     .height(100.dp)
             )
         }
-        Box(
+        PulsingSpeaker(
+            resId = R.drawable.speaker_aerocell,
+            contentDescription = "Короб AEROCELL",
+            pulse = rightPulse,
+            glowStrength = 1f,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
-                .padding(start = 4.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Image(
-                painter = painterResource(R.drawable.speaker_right),
-                contentDescription = "Короб без обработки",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit
+                .padding(start = 4.dp)
+        )
+    }
+}
+
+@Composable
+private fun PulsingSpeaker(
+    resId: Int,
+    contentDescription: String,
+    pulse: Float,
+    glowStrength: Float,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize(0.92f)) {
+            val glow = (0.22f + pulse * 0.45f) * glowStrength
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        AeroRed.copy(alpha = glow),
+                        AeroRed.copy(alpha = glow * 0.35f),
+                        Color.Transparent
+                    )
+                ),
+                radius = size.minDimension * (0.42f + pulse * 0.06f)
             )
         }
+        Image(
+            painter = painterResource(resId),
+            contentDescription = contentDescription,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val s = 1f + pulse * 0.06f
+                    scaleX = s
+                    scaleY = s
+                },
+            contentScale = ContentScale.Fit
+        )
     }
 }
 
@@ -389,8 +437,8 @@ private fun BalanceRow(
         ) {
             BalanceLabel(
                 letter = "L",
-                title = "Короб с обработкой",
-                accent = "AEROCELL",
+                title = "Короб без обработки",
+                accent = null,
                 alignEnd = false,
                 modifier = Modifier
                     .widthIn(min = 170.dp)
@@ -405,8 +453,8 @@ private fun BalanceRow(
             )
             BalanceLabel(
                 letter = "R",
-                title = "Короб без обработки",
-                accent = null,
+                title = "Короб с обработкой",
+                accent = "AEROCELL",
                 alignEnd = true,
                 modifier = Modifier
                     .widthIn(min = 170.dp)
