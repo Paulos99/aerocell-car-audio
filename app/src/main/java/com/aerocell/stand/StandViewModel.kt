@@ -20,7 +20,8 @@ data class StandUiState(
     val durationMs: Int = 0,
     val pan: Float = 0f,
     val volume: Float = 0.85f,
-    val waveform: ByteArray = ByteArray(0)
+    val waveform: ByteArray = ByteArray(0),
+    val midEnergy: Float = 0f
 )
 
 class StandViewModel(application: Application) : AndroidViewModel(application) {
@@ -90,7 +91,8 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
                 playing = player.isPlaying,
                 positionMs = player.position,
                 durationMs = player.duration,
-                waveform = player.waveform
+                waveform = player.waveform,
+                midEnergy = player.midEnergy
             )
         }
     }

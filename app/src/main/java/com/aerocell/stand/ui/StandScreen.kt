@@ -124,6 +124,7 @@ fun StandScreen(
             ComparisonStage(
                 playing = state.playing,
                 waveform = state.waveform,
+                midEnergy = state.midEnergy,
                 pan = state.pan,
                 modifier = Modifier
                     .weight(1f)
@@ -154,8 +155,8 @@ private fun Header() {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(78.dp)
-            .padding(horizontal = 24.dp, vertical = 4.dp),
+            .height(195.dp)
+            .padding(horizontal = 12.dp, vertical = 2.dp),
         contentAlignment = Alignment.Center
     ) {
         Image(
@@ -171,15 +172,19 @@ private fun Header() {
 private fun ComparisonStage(
     playing: Boolean,
     waveform: ByteArray,
+    midEnergy: Float,
     pan: Float,
     modifier: Modifier = Modifier
 ) {
     val bassPulse = rememberBassPulse(playing, waveform)
+    val midPulse = rememberMidPulse(playing, midEnergy)
     val leftLevel = if (pan <= 0f) 1f else 1f - pan
     val rightLevel = if (pan >= 0f) 1f else 1f + pan
     // Left = untreated (2x weaker), Right = AEROCELL
-    val leftPulse = bassPulse * leftLevel * 0.5f
-    val rightPulse = bassPulse * rightLevel
+    val leftBass = bassPulse * leftLevel * 0.5f
+    val rightBass = bassPulse * rightLevel
+    val leftGlow = midPulse * leftLevel * 0.5f
+    val rightGlow = midPulse * rightLevel
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
@@ -188,8 +193,9 @@ private fun ComparisonStage(
         PulsingSpeaker(
             resId = R.drawable.speaker_untreated,
             contentDescription = "Короб без обработки",
-            pulse = leftPulse,
-            glowStrength = 0.55f,
+            bassPulse = leftBass,
+            glowPulse = leftGlow,
+            glowStrength = 0.75f,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
@@ -227,8 +233,9 @@ private fun ComparisonStage(
         PulsingSpeaker(
             resId = R.drawable.speaker_aerocell,
             contentDescription = "Короб AEROCELL",
-            pulse = rightPulse,
-            glowStrength = 1f,
+            bassPulse = rightBass,
+            glowPulse = rightGlow,
+            glowStrength = 1.15f,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
@@ -241,7 +248,8 @@ private fun ComparisonStage(
 private fun PulsingSpeaker(
     resId: Int,
     contentDescription: String,
-    pulse: Float,
+    bassPulse: Float,
+    glowPulse: Float,
     glowStrength: Float,
     modifier: Modifier = Modifier
 ) {
@@ -249,17 +257,29 @@ private fun PulsingSpeaker(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.fillMaxSize(0.92f)) {
-            val glow = (0.22f + pulse * 0.45f) * glowStrength
+        // Glow sits behind the enclosure and blooms with mid energy
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize(0.98f)
+                .graphicsLayer { alpha = 1f }
+        ) {
+            val intensity = (0.35f + glowPulse * 0.85f) * glowStrength
+            val radius = size.minDimension * (0.48f + glowPulse * 0.12f)
+            // offset slightly back/down so light reads as behind the box
+            val center = Offset(size.width * 0.5f, size.height * 0.52f)
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        AeroRed.copy(alpha = glow),
-                        AeroRed.copy(alpha = glow * 0.35f),
+                        Color(0xFFFF3B3B).copy(alpha = (intensity * 0.95f).coerceAtMost(1f)),
+                        AeroRed.copy(alpha = (intensity * 0.55f).coerceAtMost(1f)),
+                        AeroRedDark.copy(alpha = (intensity * 0.22f).coerceAtMost(1f)),
                         Color.Transparent
-                    )
+                    ),
+                    center = center,
+                    radius = radius
                 ),
-                radius = size.minDimension * (0.42f + pulse * 0.06f)
+                radius = radius,
+                center = center
             )
         }
         Image(
@@ -268,7 +288,7 @@ private fun PulsingSpeaker(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    val s = 1f + pulse * 0.06f
+                    val s = 1f + bassPulse * 0.06f
                     scaleX = s
                     scaleY = s
                 },
@@ -307,6 +327,22 @@ private fun rememberBassPulse(playing: Boolean, waveform: ByteArray): Float {
                         smoothed += (target - smoothed) * 0.28f
                     }
                 }
+            }
+        }
+    }
+    return smoothed
+}
+
+@Composable
+private fun rememberMidPulse(playing: Boolean, midEnergy: Float): Float {
+    var smoothed by remember { mutableFloatStateOf(0f) }
+    val latestMid = rememberUpdatedState(midEnergy)
+    val latestPlaying = rememberUpdatedState(playing)
+    LaunchedEffect(Unit) {
+        while (true) {
+            withFrameMillis {
+                val target = if (latestPlaying.value) latestMid.value.coerceIn(0f, 1f) else 0f
+                smoothed += (target - smoothed) * 0.32f
             }
         }
     }

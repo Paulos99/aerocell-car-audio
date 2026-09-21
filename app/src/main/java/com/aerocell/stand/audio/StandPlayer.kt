@@ -32,6 +32,10 @@ class StandPlayer(private val context: Context) {
 
     var waveform: ByteArray = ByteArray(0)
         private set
+    /** 0..1 mid-band energy from Visualizer FFT (~250 Hz–2.5 kHz). */
+    @Volatile
+    var midEnergy: Float = 0f
+        private set
 
     val isPlaying: Boolean get() = player?.isPlaying == true
     val position: Int get() = player?.currentPosition ?: 0
@@ -43,6 +47,7 @@ class StandPlayer(private val context: Context) {
         player?.release()
         player = null
         waveform = ByteArray(0)
+        midEnergy = 0f
 
         this.pan = pan.coerceIn(-1f, 1f)
         this.volume = volume.coerceIn(0f, 1f)
@@ -97,6 +102,7 @@ class StandPlayer(private val context: Context) {
         player?.release()
         player = null
         waveform = ByteArray(0)
+        midEnergy = 0f
     }
 
     private fun applyLevels() {
@@ -139,11 +145,31 @@ class StandPlayer(private val context: Context) {
                             visualizer: Visualizer?,
                             fft: ByteArray?,
                             samplingRate: Int
-                        ) = Unit
+                        ) {
+                            if (fft == null || fft.size < 8) return
+                            // FFT layout: [Re0, Im0, Re1, Im1, ...]
+                            val n = fft.size / 2
+                            val nyquist = samplingRate / 2f
+                            val hzPerBin = if (n > 1) nyquist / (n - 1).toFloat() else 1f
+                            var sum = 0.0
+                            var count = 0
+                            for (i in 1 until n) {
+                                val hz = i * hzPerBin
+                                if (hz < 250f || hz > 2500f) continue
+                                val re = fft[i * 2].toInt()
+                                val im = fft[i * 2 + 1].toInt()
+                                sum += re * re + im * im
+                                count++
+                            }
+                            if (count == 0) return
+                            val rms = kotlin.math.sqrt(sum / count).toFloat()
+                            // Visualizer magnitudes are small; scale into 0..1
+                            midEnergy = (rms / 40f).coerceIn(0f, 1f)
+                        }
                     },
                     max(Visualizer.getMaxCaptureRate() / 2, 10000),
                     true,
-                    false
+                    true
                 )
                 enabled = true
             }
