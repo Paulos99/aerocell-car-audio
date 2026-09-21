@@ -19,6 +19,7 @@ data class StandUiState(
     val positionMs: Int = 0,
     val durationMs: Int = 0,
     val pan: Float = 0f,
+    val volume: Float = 0.85f,
     val waveform: ByteArray = ByteArray(0)
 )
 
@@ -29,7 +30,8 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
     private var ticker: Job? = null
 
     init {
-        player.prepare(StandTrack.Club, pan = 0f, autoplay = false)
+        val s = _state.value
+        player.prepare(StandTrack.Club, pan = s.pan, volume = s.volume, autoplay = false)
         publish()
         ticker = viewModelScope.launch {
             while (isActive) {
@@ -40,10 +42,14 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectTrack(track: StandTrack) {
-        val pan = _state.value.pan
-        player.prepare(track, pan, autoplay = true)
+        val s = _state.value
+        player.prepare(track, s.pan, s.volume, autoplay = true)
         _state.update { it.copy(track = track) }
         publish()
+    }
+
+    fun previousTrack() {
+        selectTrack(StandTrack.previousOf(_state.value.track))
     }
 
     fun play() {
@@ -70,6 +76,12 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         val next = pan.coerceIn(-1f, 1f)
         player.applyPan(next)
         _state.update { it.copy(pan = next) }
+    }
+
+    fun setVolume(volume: Float) {
+        val next = volume.coerceIn(0f, 1f)
+        player.applyVolume(next)
+        _state.update { it.copy(volume = next) }
     }
 
     private fun publish() {

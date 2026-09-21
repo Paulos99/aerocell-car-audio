@@ -7,18 +7,29 @@ import com.aerocell.stand.R
 import kotlin.math.max
 
 enum class StandTrack(
-    val title: String,
+    val label: String,
     val subtitle: String,
     val rawRes: Int
 ) {
-    Club("Клуб", "Electro House", R.raw.club),
-    Classical("Классика", "Вивальди · Весна", R.raw.classical),
-    Rock("Рок", "Hard Rock", R.raw.rock)
+    Club("CLUB", "Electro House", R.raw.club),
+    Rock("ROCK", "Hard Rock", R.raw.rock),
+    Classical("CLASSIC", "Вивальди · Весна", R.raw.classical);
+
+    companion object {
+        fun previousOf(current: StandTrack): StandTrack {
+            val all = entries
+            val idx = all.indexOf(current)
+            return all[(idx - 1 + all.size) % all.size]
+        }
+    }
 }
 
 class StandPlayer(private val context: Context) {
     private var player: MediaPlayer? = null
     private var visualizer: Visualizer? = null
+    private var pan: Float = 0f
+    private var volume: Float = 0.85f
+
     var waveform: ByteArray = ByteArray(0)
         private set
 
@@ -26,11 +37,18 @@ class StandPlayer(private val context: Context) {
     val position: Int get() = player?.currentPosition ?: 0
     val duration: Int get() = player?.duration?.takeIf { it > 0 } ?: 0
 
-    fun prepare(track: StandTrack, pan: Float, autoplay: Boolean) {
-        release()
+    fun prepare(track: StandTrack, pan: Float, volume: Float, autoplay: Boolean) {
+        releaseVisualizerOnly()
+        player?.reset()
+        player?.release()
+        player = null
+        waveform = ByteArray(0)
+
+        this.pan = pan.coerceIn(-1f, 1f)
+        this.volume = volume.coerceIn(0f, 1f)
         val next = MediaPlayer.create(context, track.rawRes) ?: return
         player = next
-        applyPan(pan)
+        applyLevels()
         next.setOnCompletionListener {
             it.seekTo(0)
             it.pause()
@@ -64,20 +82,38 @@ class StandPlayer(private val context: Context) {
     }
 
     fun applyPan(pan: Float) {
-        val clamped = pan.coerceIn(-1f, 1f)
-        val left = if (clamped <= 0f) 1f else 1f - clamped
-        val right = if (clamped >= 0f) 1f else 1f + clamped
-        player?.setVolume(left, right)
+        this.pan = pan.coerceIn(-1f, 1f)
+        applyLevels()
+    }
+
+    fun applyVolume(volume: Float) {
+        this.volume = volume.coerceIn(0f, 1f)
+        applyLevels()
     }
 
     fun release() {
-        visualizer?.enabled = false
-        visualizer?.release()
-        visualizer = null
+        releaseVisualizerOnly()
         player?.reset()
         player?.release()
         player = null
         waveform = ByteArray(0)
+    }
+
+    private fun applyLevels() {
+        val vol = volume
+        val clamped = pan
+        val left = (if (clamped <= 0f) 1f else 1f - clamped) * vol
+        val right = (if (clamped >= 0f) 1f else 1f + clamped) * vol
+        player?.setVolume(left, right)
+    }
+
+    private fun releaseVisualizerOnly() {
+        try {
+            visualizer?.enabled = false
+            visualizer?.release()
+        } catch (_: Throwable) {
+        }
+        visualizer = null
     }
 
     private fun attachVisualizer(sessionId: Int) {

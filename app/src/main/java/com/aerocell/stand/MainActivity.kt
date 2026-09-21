@@ -47,11 +47,12 @@ class MainActivity : ComponentActivity() {
                     StandScreen(
                         state = state,
                         onSelectTrack = viewModel::selectTrack,
+                        onPrevious = viewModel::previousTrack,
                         onPlay = viewModel::play,
                         onPause = viewModel::pause,
                         onStop = viewModel::stop,
-                        onSeek = viewModel::seek,
-                        onPan = viewModel::setPan
+                        onPan = viewModel::setPan,
+                        onVolume = viewModel::setVolume
                     )
                 }
             }

@@ -9,14 +9,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-val AeroRed = Color(0xFFE53935)
-val AeroRedDark = Color(0xFFB71C1C)
-val AeroBg = Color(0xFF070707)
+val AeroRed = Color(0xFFFF1A1A)
+val AeroRedDark = Color(0xFFB00000)
+val AeroRedGlow = Color(0xFFFF3B3B)
+val AeroBg = Color(0xFF000000)
 val AeroPanel = Color(0xFF141414)
-val AeroLine = Color(0xE6FFFFFF)
+val AeroPanelSoft = Color(0xFF1A1A1A)
+val AeroTrackDim = Color(0xFF3A3A3A)
 val AeroMuted = Color(0xB8FFFFFF)
-val AeroCyan = Color(0xFF4FC3F7)
-val AeroGreen = Color(0xFF8BC34A)
+val AeroSilver = Color(0xFFD8D8D8)
 
 private val Colors = darkColorScheme(
     primary = AeroRed,
@@ -37,7 +38,7 @@ fun AerocellTheme(content: @Composable () -> Unit) {
                 fontWeight = FontWeight.Black,
                 fontSize = 64.sp,
                 letterSpacing = 8.sp,
-                color = Color.White
+                color = AeroRedGlow
             ),
             headlineMedium = TextStyle(
                 fontFamily = FontFamily.SansSerif,
