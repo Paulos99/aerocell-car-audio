@@ -44,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -83,6 +84,7 @@ import com.aerocell.stand.ui.theme.AeroRedDark
 import com.aerocell.stand.ui.theme.AeroRedGlow
 import com.aerocell.stand.ui.theme.AeroSilver
 import com.aerocell.stand.ui.theme.AeroTrackDim
+import kotlinx.coroutines.delay
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -485,6 +487,8 @@ private fun BalanceFader(
     modifier: Modifier = Modifier
 ) {
     var dragging by remember { mutableStateOf(false) }
+    var autoInvite by remember { mutableStateOf(true) }
+    var manualEpoch by remember { mutableLongStateOf(0L) }
     val infinite = rememberInfiniteTransition(label = "balanceInvite")
     val invitePan by infinite.animateFloat(
         initialValue = -0.38f,
@@ -504,7 +508,13 @@ private fun BalanceFader(
         ),
         label = "invitePulse"
     )
-    val visualPan = if (dragging) pan else invitePan
+    LaunchedEffect(autoInvite, manualEpoch) {
+        if (!autoInvite) {
+            delay(5 * 60 * 1000L)
+            autoInvite = true
+        }
+    }
+    val visualPan = if (autoInvite && !dragging) invitePan else pan
     val latest = rememberUpdatedState(onPan)
     Box(
         modifier = modifier.pointerInput(Unit) {
@@ -514,6 +524,8 @@ private fun BalanceFader(
             }
             awaitEachGesture {
                 val down = awaitFirstDown()
+                autoInvite = false
+                manualEpoch = System.currentTimeMillis()
                 dragging = true
                 emit(down.position.x)
                 drag(down.id) { change ->
@@ -521,6 +533,7 @@ private fun BalanceFader(
                     change.consume()
                 }
                 dragging = false
+                manualEpoch = System.currentTimeMillis()
             }
         },
         contentAlignment = Alignment.Center
@@ -531,7 +544,7 @@ private fun BalanceFader(
             val mid = size.width / 2f
             val t = ((visualPan + 1f) / 2f).coerceIn(0f, 1f)
             val thumbX = t * size.width
-            val pulse = if (dragging) 1f else invitePulse
+            val pulse = if (autoInvite && !dragging) invitePulse else 1f
             drawRoundRect(
                 color = AeroTrackDim,
                 topLeft = Offset(0f, y - trackH / 2f),
