@@ -4,9 +4,11 @@
 
 ## Установка
 
-1. Скачайте `AEROCELL-debug.apk` из этого репозитория.
-2. Скопируйте файл на планшет и разрешите установку из этого источника.
+1. Отсканируйте QR `AEROCELL-download-qr.png` с планшета **или** скачайте [AEROCELL-debug.apk](https://raw.githubusercontent.com/Paulos99/aerocell-car-audio/main/AEROCELL-debug.apk).
+2. Разрешите установку из этого источника.
 3. Откройте **AEROCELL**.
+
+Прямая ссылка для QR: `https://raw.githubusercontent.com/Paulos99/aerocell-car-audio/main/AEROCELL-debug.apk`
 
 При первом запуске Android может спросить доступ к микрофону. Это нужно только визуализатору, запись не ведётся.
 
