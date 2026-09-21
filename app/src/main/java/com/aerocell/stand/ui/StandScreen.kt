@@ -151,33 +151,18 @@ fun StandScreen(
 
 @Composable
 private fun Header() {
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .height(78.dp)
+            .padding(horizontal = 24.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center
     ) {
-        val logoBrush = Brush.verticalGradient(
-            colors = listOf(Color(0xFFFF5555), Color(0xFFE53935), Color(0xFF9A0000))
-        )
-        Text(
-            text = "aerocell",
-            style = androidx.compose.ui.text.TextStyle(
-                brush = logoBrush,
-                fontWeight = FontWeight.Bold,
-                fontSize = 22.sp,
-                letterSpacing = 1.5.sp
-            )
-        )
-        Text(
-            text = "QP",
-            style = androidx.compose.ui.text.TextStyle(
-                brush = logoBrush,
-                fontWeight = FontWeight.Black,
-                fontSize = 36.sp,
-                letterSpacing = 2.sp
-            ),
-            modifier = Modifier.shadow(16.dp, spotColor = AeroRed, ambientColor = AeroRed)
+        Image(
+            painter = painterResource(R.drawable.aerocell_qp_logo),
+            contentDescription = "aerocell QP",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit
         )
     }
 }
