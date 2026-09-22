@@ -173,19 +173,19 @@ private fun ComparisonStage(
     val bassPulse = rememberBassPulse(playing, waveform)
     val leftLevel = if (pan <= 0f) 1f else 1f - pan
     val rightLevel = if (pan >= 0f) 1f else 1f + pan
-    // Left = untreated (2x weaker), Right = AEROCELL
-    val leftPulse = bassPulse * leftLevel * 0.5f
-    val rightPulse = bassPulse * rightLevel
+    // Left = AEROCELL, Right = untreated (2x weaker)
+    val leftPulse = bassPulse * leftLevel
+    val rightPulse = bassPulse * rightLevel * 0.5f
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         PulsingSpeaker(
-            resId = R.drawable.speaker_untreated,
-            contentDescription = "Короб без обработки",
+            resId = R.drawable.speaker_aerocell_genio,
+            contentDescription = "Короб AEROCELL",
             pulse = leftPulse,
-            glowStrength = 0.55f,
+            glowStrength = 1f,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
@@ -221,10 +221,10 @@ private fun ComparisonStage(
             )
         }
         PulsingSpeaker(
-            resId = R.drawable.speaker_aerocell,
-            contentDescription = "Короб AEROCELL",
+            resId = R.drawable.speaker_right,
+            contentDescription = "Короб без обработки",
             pulse = rightPulse,
-            glowStrength = 1f,
+            glowStrength = 0.55f,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
@@ -426,8 +426,8 @@ private fun BalanceRow(
         ) {
             BalanceLabel(
                 letter = "L",
-                title = "Короб без обработки",
-                accent = null,
+                title = "Короб с обработкой",
+                accent = "AEROCELL",
                 alignEnd = false,
                 modifier = Modifier
                     .widthIn(min = 170.dp)
@@ -442,8 +442,8 @@ private fun BalanceRow(
             )
             BalanceLabel(
                 letter = "R",
-                title = "Короб с обработкой",
-                accent = "AEROCELL",
+                title = "Короб без обработки",
+                accent = null,
                 alignEnd = true,
                 modifier = Modifier
                     .widthIn(min = 170.dp)
