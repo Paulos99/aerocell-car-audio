@@ -1,0 +1,97 @@
+package com.aerocell.stand.update
+
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class ContentManifest(
+    val manifestVersion: Int,
+    val contentVersion: Int,
+    val publishedAt: String?,
+    val minAppVersionCode: Int,
+    val apk: ApkInfo?,
+    val files: List<ContentFile>,
+    val config: ContentConfig?
+)
+
+data class ApkInfo(
+    val applicationId: String?,
+    val versionCode: Int,
+    val versionName: String,
+    val url: String,
+    val sha256: String,
+    val size: Long
+)
+
+data class ContentFile(
+    val id: String,
+    val type: String,
+    val role: String,
+    val title: String?,
+    val genre: String?,
+    val url: String,
+    val sha256: String,
+    val size: Long
+)
+
+data class ContentConfig(
+    val location: String?,
+    val rawJson: String?
+)
+
+object ContentManifestParser {
+    fun parse(text: String): ContentManifest {
+        val obj = JSONObject(text)
+        val filesJson = obj.optJSONArray("files") ?: JSONArray()
+        val files = ArrayList<ContentFile>(filesJson.length())
+        for (i in 0 until filesJson.length()) {
+            val f = filesJson.getJSONObject(i)
+            files.add(
+                ContentFile(
+                    id = f.getString("id"),
+                    type = f.optString("type", "file"),
+                    role = f.optString("role", ""),
+                    title = f.optionalString("title"),
+                    genre = f.optionalString("genre"),
+                    url = f.getString("url"),
+                    sha256 = f.getString("sha256").trim().lowercase(),
+                    size = f.optLong("size", 0L)
+                )
+            )
+        }
+        val apkObj = obj.optJSONObject("apk")
+        val apk = if (apkObj == null) {
+            null
+        } else {
+            ApkInfo(
+                applicationId = apkObj.optionalString("applicationId"),
+                versionCode = apkObj.getInt("versionCode"),
+                versionName = apkObj.optString("versionName", ""),
+                url = apkObj.getString("url"),
+                sha256 = apkObj.getString("sha256").trim().lowercase(),
+                size = apkObj.optLong("size", 0L)
+            )
+        }
+        val configObj = obj.optJSONObject("config")
+        val config = configObj?.let {
+            ContentConfig(
+                location = it.optionalString("location"),
+                rawJson = it.toString()
+            )
+        }
+        return ContentManifest(
+            manifestVersion = obj.optInt("manifestVersion", 1),
+            contentVersion = obj.getInt("contentVersion"),
+            publishedAt = obj.optionalString("publishedAt"),
+            minAppVersionCode = obj.optInt("minAppVersionCode", 1),
+            apk = apk,
+            files = files,
+            config = config
+        )
+    }
+
+    private fun JSONObject.optionalString(key: String): String? {
+        if (!has(key) || isNull(key)) return null
+        val value = optString(key, "")
+        return value.takeIf { it.isNotBlank() }
+    }
+}

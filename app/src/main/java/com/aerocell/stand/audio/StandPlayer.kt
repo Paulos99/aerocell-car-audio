@@ -4,16 +4,18 @@ import android.content.Context
 import android.media.MediaPlayer
 import android.media.audiofx.Visualizer
 import com.aerocell.stand.R
+import java.io.File
 import kotlin.math.max
 
 enum class StandTrack(
     val label: String,
     val subtitle: String,
-    val rawRes: Int
+    val rawRes: Int,
+    val genre: String
 ) {
-    Club("CLUB", "Electro House", R.raw.club),
-    Rock("ROCK", "Hard Rock", R.raw.rock),
-    Classical("CLASSIC", "Вивальди · Весна", R.raw.classical);
+    Club("CLUB", "Electro House", R.raw.club, "CLUB"),
+    Rock("ROCK", "Hard Rock", R.raw.rock, "ROCK"),
+    Classical("CLASSIC", "Вивальди · Весна", R.raw.classical, "CLASSIC");
 
     companion object {
         fun previousOf(current: StandTrack): StandTrack {
@@ -41,7 +43,7 @@ class StandPlayer(private val context: Context) {
     val position: Int get() = player?.currentPosition ?: 0
     val duration: Int get() = player?.duration?.takeIf { it > 0 } ?: 0
 
-    fun prepare(track: StandTrack, pan: Float, volume: Float, autoplay: Boolean) {
+    fun prepare(track: StandTrack, pan: Float, volume: Float, autoplay: Boolean, file: File? = null) {
         releaseVisualizerOnly()
         player?.reset()
         player?.release()
@@ -51,7 +53,7 @@ class StandPlayer(private val context: Context) {
 
         this.pan = pan.coerceIn(-1f, 1f)
         this.volume = volume.coerceIn(0f, 1f)
-        val next = MediaPlayer.create(context, track.rawRes) ?: return
+        val next = createPlayer(track, file) ?: return
         player = next
         applyLevels()
         next.setOnCompletionListener {
@@ -105,6 +107,20 @@ class StandPlayer(private val context: Context) {
         midEnergy = 0f
     }
 
+    private fun createPlayer(track: StandTrack, file: File?): MediaPlayer? {
+        if (file != null && file.isFile && file.length() > 0L) {
+            try {
+                return MediaPlayer().apply {
+                    setDataSource(file.absolutePath)
+                    prepare()
+                }
+            } catch (_: Throwable) {
+                // fall back to the packaged track
+            }
+        }
+        return MediaPlayer.create(context, track.rawRes)
+    }
+
     private fun applyLevels() {
         val vol = volume
         val clamped = pan
@@ -147,7 +163,6 @@ class StandPlayer(private val context: Context) {
                             samplingRate: Int
                         ) {
                             if (fft == null || fft.size < 8) return
-                            // FFT layout: [Re0, Im0, Re1, Im1, ...]
                             val n = fft.size / 2
                             val nyquist = samplingRate / 2f
                             val hzPerBin = if (n > 1) nyquist / (n - 1).toFloat() else 1f
@@ -163,7 +178,6 @@ class StandPlayer(private val context: Context) {
                             }
                             if (count == 0) return
                             val rms = kotlin.math.sqrt(sum / count).toFloat()
-                            // Visualizer magnitudes are small; scale into 0..1
                             midEnergy = (rms / 40f).coerceIn(0f, 1f)
                         }
                     },

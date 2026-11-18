@@ -11,6 +11,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
@@ -98,7 +99,11 @@ fun StandScreen(
     onPause: () -> Unit,
     onStop: () -> Unit,
     onPan: (Float) -> Unit,
-    onVolume: (Float) -> Unit
+    onVolume: (Float) -> Unit,
+    onLogoLongPress: () -> Unit = {},
+    onDismissServiceMenu: () -> Unit = {},
+    onCheckUpdates: () -> Unit = {},
+    onStartUpdate: () -> Unit = {}
 ) {
     Box(
         modifier = Modifier
@@ -136,6 +141,12 @@ fun StandScreen(
                 onPan = onPan,
                 modifier = Modifier.fillMaxWidth()
             )
+            Spacer(Modifier.height(8.dp))
+            UpdateBar(
+                state = state,
+                onStartUpdate = onStartUpdate,
+                modifier = Modifier.fillMaxWidth()
+            )
             Spacer(Modifier.height(10.dp))
             BottomBar(
                 state = state,
@@ -157,9 +168,20 @@ fun StandScreen(
                 .padding(top = 4.dp)
                 .fillMaxWidth(0.92f)
                 .height(195.dp)
-                .zIndex(10f),
+                .zIndex(10f)
+                .pointerInput(Unit) {
+                    detectTapGestures(onLongPress = { onLogoLongPress() })
+                },
             contentScale = ContentScale.Fit
         )
+        if (state.serviceMenuVisible) {
+            ServiceMenuDialog(
+                state = state,
+                onDismiss = onDismissServiceMenu,
+                onCheckUpdates = onCheckUpdates,
+                onStartUpdate = onStartUpdate
+            )
+        }
     }
 }
 

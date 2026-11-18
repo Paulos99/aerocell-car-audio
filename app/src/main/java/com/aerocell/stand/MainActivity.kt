@@ -52,11 +52,27 @@ class MainActivity : ComponentActivity() {
                         onPause = viewModel::pause,
                         onStop = viewModel::stop,
                         onPan = viewModel::setPan,
-                        onVolume = viewModel::setVolume
+                        onVolume = viewModel::setVolume,
+                        onLogoLongPress = viewModel::onLogoLongPress,
+                        onDismissServiceMenu = viewModel::dismissServiceMenu,
+                        onCheckUpdates = viewModel::checkUpdates,
+                        onStartUpdate = {
+                            val permissionIntent = viewModel.installPermissionIntent()
+                            if (permissionIntent != null) {
+                                startActivity(permissionIntent)
+                            }
+                            viewModel.startApkUpdate()
+                        }
                     )
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        hideSystemBars()
+        viewModel.onResume()
     }
 
     private fun hideSystemBars() {
