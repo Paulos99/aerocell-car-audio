@@ -1,4 +1,4 @@
-.gradle/
+/.gradle/
 .kotlin/
 **/build/
 local.properties
@@ -11,6 +11,8 @@ captures/
 tools/*
 !tools/publish_content.py
 !tools/publish_content.bat
+!tools/provision_tablet.bat
+!tools/provision_tablet.ps1
 /audio/
 AEROCELL*.html
 qr.png

@@ -5,12 +5,15 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.os.Build
+import android.util.Log
 
 class InstallResultReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
         when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                Log.i(TAG, "install needs user confirmation")
                 val confirm = if (Build.VERSION.SDK_INT >= 33) {
                     intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
                 } else {
@@ -22,13 +25,19 @@ class InstallResultReceiver : BroadcastReceiver() {
                     context.startActivity(confirm)
                 }
             }
-            PackageInstaller.STATUS_SUCCESS -> Unit
+            PackageInstaller.STATUS_SUCCESS -> {
+                Log.i(TAG, "install succeeded")
+            }
             else -> {
-                val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
-                    ?: "Не удалось установить обновление"
+                Log.e(TAG, "install failed status=$status message=$message")
+                val text = message ?: "Не удалось установить обновление"
                 val app = context.applicationContext as? StandAppHolder
-                app?.contentRepository?.reportError(message)
+                app?.contentRepository?.reportError(text)
             }
         }
+    }
+
+    companion object {
+        private const val TAG = "AerocellKiosk"
     }
 }

@@ -3,10 +3,13 @@ package com.aerocell.stand
 import android.app.Application
 import android.content.Intent
 import android.os.SystemClock
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aerocell.stand.audio.StandPlayer
 import com.aerocell.stand.audio.StandTrack
+import com.aerocell.stand.kiosk.KioskController
+import com.aerocell.stand.kiosk.KioskPolicy
 import com.aerocell.stand.update.ApkInstaller
 import com.aerocell.stand.update.ContentRepository
 import com.aerocell.stand.update.IdleConfig
@@ -45,20 +48,29 @@ data class StandUiState(
     val idleActive: Boolean = false,
     val idleVideos: List<File> = emptyList(),
     val idleTimeoutSec: Int = IdleConfig.DEFAULT_TIMEOUT_SEC,
-    val idleVideoVolume: Float = IdleConfig.DEFAULT_VIDEO_VOLUME
+    val idleVideoVolume: Float = IdleConfig.DEFAULT_VIDEO_VOLUME,
+    val kioskEnabled: Boolean = false,
+    val kioskLockTaskDesired: Boolean = false
 )
 
 class StandViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: ContentRepository =
         (application as StandApplication).contentRepository
     private val installer = ApkInstaller(application)
+    private val kiosk = KioskController(application)
     private val player = StandPlayer(application)
-    private val _state = MutableStateFlow(StandUiState())
+    private val _state = MutableStateFlow(
+        StandUiState(
+            kioskEnabled = kiosk.isDeviceOwner(),
+            kioskLockTaskDesired = kiosk.isDeviceOwner()
+        )
+    )
     val state: StateFlow<StandUiState> = _state
     private var ticker: Job? = null
     private var pendingInstall = false
     private var cacheBoundFor: StandTrack? = null
     @Volatile private var lastInteractionAt = SystemClock.elapsedRealtime()
+    private var autoInstallAttemptedFor: Int? = null
 
     init {
         val s = _state.value
@@ -152,7 +164,13 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         // На экране простоя музыка стенда не играет.
         if (player.isPlaying) player.stop()
         refreshIdleContent()
-        _state.update { it.copy(idleActive = true) }
+        _state.update {
+            it.copy(
+                idleActive = true,
+                // После работы персонала киоск снова запирается, когда стенд уходит в простой.
+                kioskLockTaskDesired = if (it.kioskEnabled) true else it.kioskLockTaskDesired
+            )
+        }
         publish()
     }
 
@@ -169,7 +187,26 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
             if (!s.idleActive && now - lastInteractionAt >= s.idleTimeoutSec * 1_000L) {
                 enterIdle()
             }
+            maybeAutoInstall()
         }
+    }
+
+    private fun maybeAutoInstall() {
+        val sync = repository.state.value
+        val s = _state.value
+        if (!KioskPolicy.shouldAutoInstall(
+                isDeviceOwner = kiosk.isDeviceOwner(),
+                updateAvailable = s.updateAvailable,
+                apkBusy = s.apkBusy,
+                serviceMenuVisible = s.serviceMenuVisible,
+                playing = player.isPlaying,
+                idleActive = s.idleActive
+            )
+        ) return
+        val versionCode = sync.updateVersionCode ?: return
+        if (autoInstallAttemptedFor == versionCode) return
+        autoInstallAttemptedFor = versionCode
+        viewModelScope.launch { performApkUpdate(silent = true) }
     }
 
     private fun refreshIdleContent() {
@@ -199,36 +236,88 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startApkUpdate() {
-        viewModelScope.launch { performApkUpdate() }
+        viewModelScope.launch { performApkUpdate(silent = false) }
+    }
+
+    fun exitKioskTemporarily(pin: String): Boolean {
+        if (!kiosk.isDeviceOwner()) return false
+        if (!KioskPolicy.pinMatches(pin, repository.kioskConfig().pin)) return false
+        _state.update { it.copy(kioskLockTaskDesired = false, serviceMenuVisible = false) }
+        return true
+    }
+
+    fun resumeKiosk() {
+        if (!kiosk.isDeviceOwner()) return
+        _state.update { it.copy(kioskEnabled = true, kioskLockTaskDesired = true) }
+    }
+
+    fun clearKiosk(pin: String): Boolean {
+        if (!kiosk.isDeviceOwner()) return false
+        if (!KioskPolicy.pinMatches(pin, repository.kioskConfig().pin)) return false
+        return try {
+            kiosk.clearDeviceOwner()
+            _state.update {
+                it.copy(
+                    kioskEnabled = false,
+                    kioskLockTaskDesired = false,
+                    serviceMenuVisible = false
+                )
+            }
+            true
+        } catch (t: Throwable) {
+            Log.e(TAG, "failed to clear device owner", t)
+            repository.reportError(t.message ?: "Не удалось снять режим киоска")
+            false
+        }
     }
 
     fun onResume() {
         if (pendingInstall && installer.canInstall()) {
             pendingInstall = false
             repository.markNeedInstallPermission(false)
-            viewModelScope.launch { performApkUpdate() }
+            viewModelScope.launch { performApkUpdate(silent = false) }
         }
         maybeBindCachedTrack()
+        val owner = kiosk.isDeviceOwner()
+        _state.update {
+            it.copy(
+                kioskEnabled = owner,
+                kioskLockTaskDesired = if (owner) it.kioskLockTaskDesired else false
+            )
+        }
     }
 
     fun installPermissionIntent(): Intent? {
+        if (kiosk.isDeviceOwner()) return null
         return if (installer.canInstall()) null else installer.permissionSettingsIntent()
     }
 
-    private suspend fun performApkUpdate() {
+    private suspend fun performApkUpdate(silent: Boolean) {
         val manifest = repository.loadCachedManifest()
         val apk = manifest?.apk ?: return
         if (apk.versionCode <= BuildConfig.VERSION_CODE) return
         if (!apk.applicationId.isNullOrBlank() && apk.applicationId != BuildConfig.APPLICATION_ID) return
-        if (!installer.canInstall()) {
+        val allowSilent = silent && kiosk.isDeviceOwner()
+        if (!allowSilent && !installer.canInstall()) {
             pendingInstall = true
             repository.markNeedInstallPermission(true)
             return
         }
         try {
             val file = withContext(Dispatchers.IO) { repository.downloadApk(apk) }
+            val s = _state.value
+            if (allowSilent && (
+                    player.isPlaying ||
+                        s.serviceMenuVisible ||
+                        !s.idleActive
+                    )
+            ) {
+                // Скачали, но демонстрация уже началась — поставим, когда стенд снова простаивает.
+                autoInstallAttemptedFor = null
+                return
+            }
             repository.markInstalling()
-            installer.install(file)
+            installer.install(file, silent = allowSilent)
         } catch (t: Throwable) {
             repository.reportError(t.message ?: "Не удалось установить обновление")
         }
@@ -286,5 +375,9 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         ticker?.cancel()
         player.release()
         super.onCleared()
+    }
+
+    companion object {
+        private const val TAG = "AerocellKiosk"
     }
 }

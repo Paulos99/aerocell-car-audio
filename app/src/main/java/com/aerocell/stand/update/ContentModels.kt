@@ -1,5 +1,6 @@
 package com.aerocell.stand.update
 
+import com.aerocell.stand.kiosk.KioskPolicy
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -36,7 +37,8 @@ data class ContentFile(
 data class ContentConfig(
     val location: String?,
     val rawJson: String?,
-    val idle: IdleConfig = IdleConfig()
+    val idle: IdleConfig = IdleConfig(),
+    val kiosk: KioskConfig = KioskConfig()
 )
 
 /** Настройки режима простоя из config.idle манифеста. */
@@ -50,6 +52,11 @@ data class IdleConfig(
         const val MIN_TIMEOUT_SEC = 10
     }
 }
+
+/** Настройки киоска из config.kiosk манифеста. */
+data class KioskConfig(
+    val pin: String = KioskPolicy.DEFAULT_PIN
+)
 
 object ContentManifestParser {
     fun parse(text: String): ContentManifest {
@@ -89,7 +96,8 @@ object ContentManifestParser {
             ContentConfig(
                 location = it.optionalString("location"),
                 rawJson = it.toString(),
-                idle = parseIdle(it.optJSONObject("idle"))
+                idle = parseIdle(it.optJSONObject("idle")),
+                kiosk = parseKiosk(it.optJSONObject("kiosk"))
             )
         }
         return ContentManifest(
@@ -112,6 +120,11 @@ object ContentManifestParser {
         val rawVolume = idle.optDouble("videoVolume", IdleConfig.DEFAULT_VIDEO_VOLUME.toDouble())
         val volume = if (rawVolume.isNaN()) IdleConfig.DEFAULT_VIDEO_VOLUME else rawVolume.toFloat().coerceIn(0f, 1f)
         return IdleConfig(timeoutSec = timeout, videoVolume = volume)
+    }
+
+    fun parseKiosk(kiosk: JSONObject?): KioskConfig {
+        if (kiosk == null) return KioskConfig()
+        return KioskConfig(pin = KioskPolicy.resolvePin(kiosk.optString("pin", "")))
     }
 
     private fun JSONObject.optionalString(key: String): String? {

@@ -105,7 +105,10 @@ fun StandScreen(
     onDismissServiceMenu: () -> Unit = {},
     onShowIdle: () -> Unit = {},
     onCheckUpdates: () -> Unit = {},
-    onStartUpdate: () -> Unit = {}
+    onStartUpdate: () -> Unit = {},
+    onExitKiosk: (String) -> Boolean = { false },
+    onResumeKiosk: () -> Unit = {},
+    onClearKiosk: (String) -> Boolean = { false }
 ) {
     Box(
         modifier = Modifier
@@ -192,7 +195,10 @@ fun StandScreen(
                 onDismiss = onDismissServiceMenu,
                 onShowIdle = onShowIdle,
                 onCheckUpdates = onCheckUpdates,
-                onStartUpdate = onStartUpdate
+                onStartUpdate = onStartUpdate,
+                onExitKiosk = onExitKiosk,
+                onResumeKiosk = onResumeKiosk,
+                onClearKiosk = onClearKiosk
             )
         }
         IdleOverlay(

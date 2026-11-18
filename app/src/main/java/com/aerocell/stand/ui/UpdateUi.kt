@@ -11,13 +11,22 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -100,8 +109,15 @@ fun ServiceMenuDialog(
     onDismiss: () -> Unit,
     onShowIdle: () -> Unit,
     onCheckUpdates: () -> Unit,
-    onStartUpdate: () -> Unit
+    onStartUpdate: () -> Unit,
+    onExitKiosk: (String) -> Boolean = { false },
+    onResumeKiosk: () -> Unit = {},
+    onClearKiosk: (String) -> Boolean = { false }
 ) {
+    var pinAction by remember { mutableStateOf<String?>(null) }
+    var pinValue by remember { mutableStateOf("") }
+    var pinError by remember { mutableStateOf(false) }
+
     Dialog(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
@@ -129,12 +145,103 @@ fun ServiceMenuDialog(
                 "роликов в кэше: ${state.idleVideos.size}, включается через ${state.idleTimeoutSec} с, " +
                     "громкость роликов ${(state.idleVideoVolume * 100).toInt()} %"
             )
+            val kioskStatus = when {
+                !state.kioskEnabled -> "выключен"
+                !state.kioskLockTaskDesired -> "на паузе"
+                else -> "включён"
+            }
+            MenuLine("Киоск", kioskStatus)
             if (!state.lastError.isNullOrBlank()) {
                 Spacer(Modifier.height(8.dp))
                 Text(text = state.lastError, color = AeroRed, fontSize = 13.sp)
             }
+            if (pinAction != null) {
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = if (pinAction == "clear") "PIN, чтобы снять режим киоска" else "PIN, чтобы выйти из киоска",
+                    color = AeroSilver,
+                    fontSize = 14.sp
+                )
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = pinValue,
+                    onValueChange = {
+                        pinValue = it
+                        pinError = false
+                    },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    colors = TextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedContainerColor = Color.White.copy(alpha = 0.08f),
+                        unfocusedContainerColor = Color.White.copy(alpha = 0.08f),
+                        cursorColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (pinError) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(text = "Неверный PIN", color = AeroRed, fontSize = 13.sp)
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    MenuButton(
+                        label = "ОК",
+                        filled = true,
+                        enabled = pinValue.isNotBlank(),
+                        onClick = {
+                            val ok = if (pinAction == "clear") {
+                                onClearKiosk(pinValue)
+                            } else {
+                                onExitKiosk(pinValue)
+                            }
+                            if (ok) {
+                                pinAction = null
+                                pinValue = ""
+                                pinError = false
+                            } else {
+                                pinError = true
+                            }
+                        }
+                    )
+                    MenuButton(
+                        label = "Отмена",
+                        filled = false,
+                        enabled = true,
+                        onClick = {
+                            pinAction = null
+                            pinValue = ""
+                            pinError = false
+                        }
+                    )
+                }
+            }
             Spacer(Modifier.height(20.dp))
             MenuButton(label = "Показать режим простоя", filled = false, enabled = true, onClick = onShowIdle)
+            if (state.kioskEnabled && pinAction == null) {
+                Spacer(Modifier.height(10.dp))
+                if (state.kioskLockTaskDesired) {
+                    MenuButton(
+                        label = "Выйти из киоска",
+                        filled = false,
+                        enabled = true,
+                        onClick = {
+                            pinValue = ""
+                            pinError = false
+                            pinAction = "exit"
+                        }
+                    )
+                } else {
+                    MenuButton(
+                        label = "Вернуть киоск",
+                        filled = true,
+                        enabled = true,
+                        onClick = onResumeKiosk
+                    )
+                }
+            }
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MenuButton(
@@ -152,6 +259,21 @@ fun ServiceMenuDialog(
                     )
                 }
                 MenuButton(label = "Закрыть", filled = false, enabled = true, onClick = onDismiss)
+            }
+            if (state.kioskEnabled && pinAction == null) {
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = "Снять режим киоска",
+                    color = AeroMuted,
+                    fontSize = 11.sp,
+                    modifier = Modifier
+                        .clickable {
+                            pinValue = ""
+                            pinError = false
+                            pinAction = "clear"
+                        }
+                        .padding(vertical = 4.dp)
+                )
             }
         }
     }

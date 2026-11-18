@@ -19,12 +19,18 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
+import com.aerocell.stand.kiosk.KioskController
 import com.aerocell.stand.ui.StandScreen
 import com.aerocell.stand.ui.theme.AerocellTheme
 import com.aerocell.stand.ui.theme.AeroBg
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val viewModel: StandViewModel by viewModels()
+    private val kiosk by lazy { KioskController(this) }
 
     private val micPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -35,10 +41,26 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
+        if (kiosk.isDeviceOwner()) {
+            kiosk.applyOwnerPolicies()
+        }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
             micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+
+        lifecycleScope.launch {
+            viewModel.state
+                .map { it.kioskEnabled to it.kioskLockTaskDesired }
+                .distinctUntilChanged()
+                .collect { (enabled, desired) ->
+                    if (enabled && desired) {
+                        kiosk.startLockTask(this@MainActivity)
+                    } else if (enabled) {
+                        kiosk.stopLockTask(this@MainActivity)
+                    }
+                }
         }
 
         setContent {
@@ -64,7 +86,10 @@ class MainActivity : ComponentActivity() {
                                 startActivity(permissionIntent)
                             }
                             viewModel.startApkUpdate()
-                        }
+                        },
+                        onExitKiosk = viewModel::exitKioskTemporarily,
+                        onResumeKiosk = viewModel::resumeKiosk,
+                        onClearKiosk = viewModel::clearKiosk
                     )
                 }
             }
@@ -96,6 +121,10 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         hideSystemBars()
         viewModel.onResume()
+        val s = viewModel.state.value
+        if (s.kioskEnabled && s.kioskLockTaskDesired) {
+            kiosk.startLockTask(this)
+        }
     }
 
     private fun hideSystemBars() {

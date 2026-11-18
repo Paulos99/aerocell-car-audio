@@ -104,6 +104,7 @@ class ContentRepository(private val context: Context) {
     }
 
     fun idleConfig(): IdleConfig = loadCachedManifest()?.config?.idle ?: IdleConfig()
+    fun kioskConfig(): KioskConfig = loadCachedManifest()?.config?.kiosk ?: KioskConfig()
 
     fun localMediaFile(file: ContentFile): File {
         val ext = extensionFor(file)
