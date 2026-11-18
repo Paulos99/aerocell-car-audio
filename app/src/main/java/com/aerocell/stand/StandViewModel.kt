@@ -2,12 +2,14 @@ package com.aerocell.stand
 
 import android.app.Application
 import android.content.Intent
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aerocell.stand.audio.StandPlayer
 import com.aerocell.stand.audio.StandTrack
 import com.aerocell.stand.update.ApkInstaller
 import com.aerocell.stand.update.ContentRepository
+import com.aerocell.stand.update.IdleConfig
 import com.aerocell.stand.update.SyncState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,6 +20,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 data class StandUiState(
     val track: StandTrack = StandTrack.Club,
@@ -38,7 +41,11 @@ data class StandUiState(
     val apkProgress: Float? = null,
     val apkBusy: Boolean = false,
     val serviceMenuVisible: Boolean = false,
-    val lastError: String? = null
+    val lastError: String? = null,
+    val idleActive: Boolean = false,
+    val idleVideos: List<File> = emptyList(),
+    val idleTimeoutSec: Int = IdleConfig.DEFAULT_TIMEOUT_SEC,
+    val idleVideoVolume: Float = IdleConfig.DEFAULT_VIDEO_VOLUME
 )
 
 class StandViewModel(application: Application) : AndroidViewModel(application) {
@@ -51,6 +58,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
     private var ticker: Job? = null
     private var pendingInstall = false
     private var cacheBoundFor: StandTrack? = null
+    @Volatile private var lastInteractionAt = SystemClock.elapsedRealtime()
 
     init {
         val s = _state.value
@@ -58,7 +66,9 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         if (repository.cachedTrackFile(StandTrack.Club.genre) != null) {
             cacheBoundFor = StandTrack.Club
         }
+        refreshIdleContent()
         publish()
+        viewModelScope.launch { idleWatchdog() }
         ticker = viewModelScope.launch {
             while (isActive) {
                 publish()
@@ -116,6 +126,62 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         val next = volume.coerceIn(0f, 1f)
         player.applyVolume(next)
         _state.update { it.copy(volume = next) }
+    }
+
+    /** Любое касание экрана: сбрасывает таймер простоя. */
+    fun onUserInteraction() {
+        lastInteractionAt = SystemClock.elapsedRealtime()
+    }
+
+    /** Кнопка «Показать режим простоя» в служебном меню. */
+    fun showIdleNow() {
+        _state.update { it.copy(serviceMenuVisible = false) }
+        enterIdle()
+    }
+
+    /** Первое касание в режиме простоя: только будит стенд. */
+    fun wakeFromIdle() {
+        lastInteractionAt = SystemClock.elapsedRealtime()
+        if (_state.value.idleActive) {
+            _state.update { it.copy(idleActive = false) }
+        }
+    }
+
+    private fun enterIdle() {
+        if (_state.value.idleActive) return
+        // На экране простоя музыка стенда не играет.
+        if (player.isPlaying) player.stop()
+        refreshIdleContent()
+        _state.update { it.copy(idleActive = true) }
+        publish()
+    }
+
+    private suspend fun idleWatchdog() {
+        while (true) {
+            delay(1_000)
+            val s = _state.value
+            val now = SystemClock.elapsedRealtime()
+            // Пока играет музыка, открыто меню или идёт обновление, стенд не «простаивает».
+            if (player.isPlaying || s.serviceMenuVisible || s.apkBusy) {
+                lastInteractionAt = now
+                continue
+            }
+            if (!s.idleActive && now - lastInteractionAt >= s.idleTimeoutSec * 1_000L) {
+                enterIdle()
+            }
+        }
+    }
+
+    private fun refreshIdleContent() {
+        val config = repository.idleConfig()
+        val videos = repository.cachedIdleVideos()
+        _state.update {
+            it.copy(
+                idleVideos = if (it.idleVideos == videos) it.idleVideos else videos,
+                idleTimeoutSec = config.timeoutSec,
+                idleVideoVolume = config.videoVolume
+            )
+        }
     }
 
     fun onLogoLongPress() {
@@ -189,6 +255,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
                 lastError = sync.lastError
             )
         }
+        refreshIdleContent()
         maybeBindCachedTrack()
     }
 

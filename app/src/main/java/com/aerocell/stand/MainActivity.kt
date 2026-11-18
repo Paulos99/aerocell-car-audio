@@ -3,6 +3,7 @@ package com.aerocell.stand
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -55,6 +56,7 @@ class MainActivity : ComponentActivity() {
                         onVolume = viewModel::setVolume,
                         onLogoLongPress = viewModel::onLogoLongPress,
                         onDismissServiceMenu = viewModel::dismissServiceMenu,
+                        onShowIdle = viewModel::showIdleNow,
                         onCheckUpdates = viewModel::checkUpdates,
                         onStartUpdate = {
                             val permissionIntent = viewModel.installPermissionIntent()
@@ -67,6 +69,27 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /** true, пока «съедаем» жест, который разбудил стенд. */
+    private var swallowWakeGesture = false
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val action = ev.actionMasked
+        if (action == MotionEvent.ACTION_DOWN && viewModel.state.value.idleActive) {
+            // Первое касание только будит стенд и не доходит до кнопок под экраном простоя.
+            swallowWakeGesture = true
+            viewModel.wakeFromIdle()
+            return true
+        }
+        if (swallowWakeGesture) {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                swallowWakeGesture = false
+            }
+            return true
+        }
+        viewModel.onUserInteraction()
+        return super.dispatchTouchEvent(ev)
     }
 
     override fun onResume() {

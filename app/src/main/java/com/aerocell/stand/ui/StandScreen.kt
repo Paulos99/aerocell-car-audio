@@ -103,6 +103,7 @@ fun StandScreen(
     onVolume: (Float) -> Unit,
     onLogoLongPress: () -> Unit = {},
     onDismissServiceMenu: () -> Unit = {},
+    onShowIdle: () -> Unit = {},
     onCheckUpdates: () -> Unit = {},
     onStartUpdate: () -> Unit = {}
 ) {
@@ -189,10 +190,17 @@ fun StandScreen(
             ServiceMenuDialog(
                 state = state,
                 onDismiss = onDismissServiceMenu,
+                onShowIdle = onShowIdle,
                 onCheckUpdates = onCheckUpdates,
                 onStartUpdate = onStartUpdate
             )
         }
+        IdleOverlay(
+            active = state.idleActive,
+            videos = state.idleVideos,
+            videoVolume = state.idleVideoVolume,
+            modifier = Modifier.zIndex(100f)
+        )
     }
 }
 

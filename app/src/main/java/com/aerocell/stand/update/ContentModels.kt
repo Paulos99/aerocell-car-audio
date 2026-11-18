@@ -35,8 +35,21 @@ data class ContentFile(
 
 data class ContentConfig(
     val location: String?,
-    val rawJson: String?
+    val rawJson: String?,
+    val idle: IdleConfig = IdleConfig()
 )
+
+/** Настройки режима простоя из config.idle манифеста. */
+data class IdleConfig(
+    val timeoutSec: Int = DEFAULT_TIMEOUT_SEC,
+    val videoVolume: Float = DEFAULT_VIDEO_VOLUME
+) {
+    companion object {
+        const val DEFAULT_TIMEOUT_SEC = 90
+        const val DEFAULT_VIDEO_VOLUME = 0.25f
+        const val MIN_TIMEOUT_SEC = 10
+    }
+}
 
 object ContentManifestParser {
     fun parse(text: String): ContentManifest {
@@ -75,7 +88,8 @@ object ContentManifestParser {
         val config = configObj?.let {
             ContentConfig(
                 location = it.optionalString("location"),
-                rawJson = it.toString()
+                rawJson = it.toString(),
+                idle = parseIdle(it.optJSONObject("idle"))
             )
         }
         return ContentManifest(
@@ -87,6 +101,17 @@ object ContentManifestParser {
             files = files,
             config = config
         )
+    }
+
+    fun parseIdle(idle: JSONObject?): IdleConfig {
+        if (idle == null) return IdleConfig()
+        val timeout = idle.optInt("timeoutSec", IdleConfig.DEFAULT_TIMEOUT_SEC)
+            .takeIf { it > 0 }
+            ?.coerceAtLeast(IdleConfig.MIN_TIMEOUT_SEC)
+            ?: IdleConfig.DEFAULT_TIMEOUT_SEC
+        val rawVolume = idle.optDouble("videoVolume", IdleConfig.DEFAULT_VIDEO_VOLUME.toDouble())
+        val volume = if (rawVolume.isNaN()) IdleConfig.DEFAULT_VIDEO_VOLUME else rawVolume.toFloat().coerceIn(0f, 1f)
+        return IdleConfig(timeoutSec = timeout, videoVolume = volume)
     }
 
     private fun JSONObject.optionalString(key: String): String? {

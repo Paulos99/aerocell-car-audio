@@ -89,6 +89,22 @@ class ContentRepository(private val context: Context) {
         return local.takeIf { Sha256.matches(it, item.sha256) }
     }
 
+    /**
+     * Ролики для режима простоя в порядке манифеста. Берём только полностью
+     * скачанные файлы: sha256 уже проверен при загрузке, здесь сверяем размер,
+     * чтобы не хешировать большие видео на главном потоке.
+     */
+    fun cachedIdleVideos(): List<File> {
+        val manifest = loadCachedManifest() ?: return emptyList()
+        return manifest.files
+            .filter { it.type.equals("video", ignoreCase = true) && it.role.equals("idle", ignoreCase = true) }
+            .map { it to localMediaFile(it) }
+            .filter { (item, local) -> local.isFile && local.length() > 0 && (item.size <= 0 || local.length() == item.size) }
+            .map { it.second }
+    }
+
+    fun idleConfig(): IdleConfig = loadCachedManifest()?.config?.idle ?: IdleConfig()
+
     fun localMediaFile(file: ContentFile): File {
         val ext = extensionFor(file)
         return File(mediaDir, "${file.id}-${file.sha256.take(12)}.$ext")

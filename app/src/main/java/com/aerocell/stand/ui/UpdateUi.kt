@@ -98,6 +98,7 @@ fun UpdateBar(
 fun ServiceMenuDialog(
     state: StandUiState,
     onDismiss: () -> Unit,
+    onShowIdle: () -> Unit,
     onCheckUpdates: () -> Unit,
     onStartUpdate: () -> Unit
 ) {
@@ -123,11 +124,18 @@ fun ServiceMenuDialog(
                 ?: "пока нет (встроенные треки)"
             MenuLine("Контент", content)
             MenuLine("Статус", state.contentStatusText ?: "—")
+            MenuLine(
+                "Режим простоя",
+                "роликов в кэше: ${state.idleVideos.size}, включается через ${state.idleTimeoutSec} с, " +
+                    "громкость роликов ${(state.idleVideoVolume * 100).toInt()} %"
+            )
             if (!state.lastError.isNullOrBlank()) {
                 Spacer(Modifier.height(8.dp))
                 Text(text = state.lastError, color = AeroRed, fontSize = 13.sp)
             }
             Spacer(Modifier.height(20.dp))
+            MenuButton(label = "Показать режим простоя", filled = false, enabled = true, onClick = onShowIdle)
+            Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MenuButton(
                     label = if (state.checkingUpdates) "Проверяю…" else "Проверить обновления",
