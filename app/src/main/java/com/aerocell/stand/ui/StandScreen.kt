@@ -75,6 +75,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aerocell.stand.R
+import com.aerocell.stand.BuildConfig
 import com.aerocell.stand.StandUiState
 import com.aerocell.stand.audio.StandTrack
 import com.aerocell.stand.ui.theme.AeroBg
@@ -173,6 +174,16 @@ fun StandScreen(
                     detectTapGestures(onLongPress = { onLogoLongPress() })
                 },
             contentScale = ContentScale.Fit
+        )
+        Text(
+            text = "v${BuildConfig.VERSION_NAME}",
+            color = AeroMuted,
+            fontSize = 11.sp,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(top = 8.dp, end = 16.dp)
+                .zIndex(11f)
         )
         if (state.serviceMenuVisible) {
             ServiceMenuDialog(
