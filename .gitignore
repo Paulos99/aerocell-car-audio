@@ -8,8 +8,16 @@ local.properties
 captures/
 .cxx/
 *.log
-tools/
+tools/*
+!tools/publish_content.py
+!tools/publish_content.bat
 /audio/
 AEROCELL*.html
 qr.png
 *.orig
+keystore/
+keystore.properties
+*.jks
+*.keystore
+/AEROCELL-1*.apk
+/AEROCELL-release.apk
