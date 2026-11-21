@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -66,6 +67,11 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import com.aerocell.stand.wifi.WifiNetwork
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -111,10 +117,22 @@ fun StandScreen(
     onShowIdle: () -> Unit = {},
     onCheckUpdates: () -> Unit = {},
     onStartUpdate: () -> Unit = {},
-    onExitKiosk: (String) -> Boolean = { false },
+    onExitKiosk: () -> Unit = {},
     onResumeKiosk: () -> Unit = {},
-    onClearKiosk: (String) -> Boolean = { false }
+    onClearKiosk: () -> Unit = {},
+    onHintPan: (Float) -> Unit = {},
+    onFaderBoundsInWindow: (Rect) -> Unit = {},
+    onOpenHelp: () -> Unit = {},
+    onCloseHelp: () -> Unit = {},
+    onOpenWifi: () -> Unit = {},
+    onCloseWifi: () -> Unit = {},
+    onRescanWifi: () -> Unit = {},
+    onConnectWifi: (WifiNetwork, String) -> Unit = { _, _ -> },
+    onOpenWifiSettings: () -> Unit = {}
 ) {
+    var rowBounds by remember { mutableStateOf<Rect?>(null) }
+    var faderBounds by remember { mutableStateOf<Rect?>(null) }
+    val hintVisible = state.onboarding.hintVisible && !state.idleActive
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -149,12 +167,18 @@ fun StandScreen(
             BalanceRow(
                 pan = state.pan,
                 onPan = onPan,
-                modifier = Modifier.fillMaxWidth()
+                hintActive = hintVisible,
+                onFaderPositioned = { inRoot, inWindow ->
+                    faderBounds = inRoot
+                    onFaderBoundsInWindow(inWindow)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onGloballyPositioned { rowBounds = it.boundsInRoot() }
             )
             Spacer(Modifier.height(8.dp))
             UpdateBar(
                 state = state,
-                onStartUpdate = onStartUpdate,
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(10.dp))
@@ -194,10 +218,21 @@ fun StandScreen(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(top = 8.dp, end = 16.dp)
+                .padding(top = 90.dp, end = 24.dp)
                 .zIndex(11f)
         )
+        // Плашка обновления у верхнего края, левее кнопки «?» (64 dp + отступы).
+        UpdatePill(
+            state = state,
+            onClick = onStartUpdate,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(top = 20.dp, end = 104.dp)
+                .zIndex(12f)
+        )
         OwnTrackModal(state = uploadState, onClose = onCloseUpload)
+        UploadProgressOverlay(state = uploadState, modifier = Modifier.zIndex(26f))
         if (state.serviceMenuVisible) {
             ServiceMenuDialog(
                 state = state,
@@ -205,16 +240,50 @@ fun StandScreen(
                 onShowIdle = onShowIdle,
                 onCheckUpdates = onCheckUpdates,
                 onStartUpdate = onStartUpdate,
+                onOpenWifi = onOpenWifi,
                 onExitKiosk = onExitKiosk,
                 onResumeKiosk = onResumeKiosk,
                 onClearKiosk = onClearKiosk
             )
         }
+        if (state.wifi.open) {
+            WifiDialog(
+                wifi = state.wifi,
+                onDismiss = onCloseWifi,
+                onRescan = onRescanWifi,
+                onConnect = onConnectWifi,
+                onOpenSettings = onOpenWifiSettings
+            )
+        }
+        HintOverlay(
+            visible = hintVisible,
+            balanceRowBounds = rowBounds,
+            faderBounds = faderBounds,
+            onPan = onHintPan,
+            modifier = Modifier.zIndex(50f)
+        )
+        HelpButton(
+            onClick = onOpenHelp,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(top = 20.dp, end = 24.dp)
+                .zIndex(55f)
+        )
+        HelpPanel(
+            visible = state.onboarding.helpOpen && !state.idleActive,
+            onClose = onCloseHelp,
+            modifier = Modifier.zIndex(60f)
+        )
         IdleOverlay(
             active = state.idleActive,
             videos = state.idleVideos,
             videoVolume = state.idleVideoVolume,
             modifier = Modifier.zIndex(100f)
+        )
+        UpdateScreenOverlay(
+            screen = state.updateScreen,
+            modifier = Modifier.zIndex(200f)
         )
     }
 }
@@ -459,8 +528,11 @@ private fun DrawScope.drawWaveBold(samples: FloatArray, playing: Boolean, phase:
 private fun BalanceRow(
     pan: Float,
     onPan: (Float) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    hintActive: Boolean = false,
+    onFaderPositioned: (Rect, Rect) -> Unit = { _, _ -> }
 ) {
+    val density = androidx.compose.ui.platform.LocalDensity.current.density
     Column(modifier = modifier) {
         Text(
             text = "БАЛАНС",
@@ -476,38 +548,46 @@ private fun BalanceRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                .height(FaderTouchHeight),
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            // Плашки по ширине подписи, каждая у своего края; всё остальное место отдаём ползунку.
             BalanceLabel(
                 letter = "L",
                 title = "Короб с обработкой",
                 accent = "AEROCELL",
                 alignEnd = false,
-                modifier = Modifier
-                    .widthIn(min = 170.dp)
-                    .weight(0.9f)
+                highlighted = hintActive && pan < -0.3f
             )
             BalanceFader(
                 pan = pan,
                 onPan = onPan,
+                hintActive = hintActive,
                 modifier = Modifier
-                    .weight(1.4f)
+                    .weight(1f)
                     .fillMaxHeight()
+                    .onGloballyPositioned {
+                        // Подсказке нужна видимая полоса, а касаниям — вся зона с запасом.
+                        val pad = FaderTouchSidePad.value * density
+                        val root = it.boundsInRoot()
+                        val track = Rect(root.left + pad, root.top, root.right - pad, root.bottom)
+                        onFaderPositioned(track, it.boundsInWindow())
+                    }
             )
             BalanceLabel(
                 letter = "R",
                 title = "Короб без обработки",
                 accent = null,
                 alignEnd = true,
-                modifier = Modifier
-                    .widthIn(min = 170.dp)
-                    .weight(0.9f)
+                highlighted = hintActive && pan > 0.3f
             )
         }
     }
 }
+
+/** Невидимая зона касания ползунка: по высоте и с запасом по краям полосы. */
+private val FaderTouchHeight = 72.dp
+private val FaderTouchSidePad = 20.dp
 
 @Composable
 private fun BalanceLabel(
@@ -515,16 +595,20 @@ private fun BalanceLabel(
     title: String,
     accent: String?,
     alignEnd: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    highlighted: Boolean = false
 ) {
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
             .background(AeroPanelSoft)
-            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start
+            .border(
+                if (highlighted) 1.5.dp else 1.dp,
+                if (highlighted) AeroRed else Color.White.copy(alpha = 0.12f),
+                RoundedCornerShape(10.dp)
+            )
+            .padding(start = 12.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         if (!alignEnd) {
             LetterBadge(letter)
@@ -577,7 +661,8 @@ private fun LabelTexts(title: String, accent: String?, align: TextAlign) {
 private fun BalanceFader(
     pan: Float,
     onPan: (Float) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    hintActive: Boolean = false
 ) {
     var dragging by remember { mutableStateOf(false) }
     var autoInvite by remember { mutableStateOf(true) }
@@ -607,12 +692,17 @@ private fun BalanceFader(
             autoInvite = true
         }
     }
-    val visualPan = if (autoInvite && !dragging) invitePan else pan
+    // Во время подсказки ползунок ведёт палец, своё «приглашение» не рисуем.
+    val inviting = autoInvite && !dragging && !hintActive
+    val visualPan = if (inviting) invitePan else pan
     val latest = rememberUpdatedState(onPan)
     Box(
         modifier = modifier.pointerInput(Unit) {
             fun emit(x: Float) {
-                val t = (x / size.width.toFloat()).coerceIn(0f, 1f)
+                // Зона касания шире полосы на FaderTouchSidePad с каждой стороны.
+                val pad = FaderTouchSidePad.toPx()
+                val track = (size.width - 2 * pad).coerceAtLeast(1f)
+                val t = ((x - pad) / track).coerceIn(0f, 1f)
                 latest.value(-1f + t * 2f)
             }
             awaitEachGesture {
@@ -631,13 +721,13 @@ private fun BalanceFader(
         },
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        Canvas(modifier = Modifier.fillMaxSize().padding(horizontal = FaderTouchSidePad)) {
             val trackH = 4.dp.toPx()
             val y = size.height / 2f
             val mid = size.width / 2f
             val t = ((visualPan + 1f) / 2f).coerceIn(0f, 1f)
             val thumbX = t * size.width
-            val pulse = if (autoInvite && !dragging) invitePulse else 1f
+            val pulse = if (inviting) invitePulse else 1f
             drawRoundRect(
                 color = AeroTrackDim,
                 topLeft = Offset(0f, y - trackH / 2f),
@@ -713,18 +803,19 @@ private fun BottomBar(
                         onClick = { onSelectTrack(track) }
                     )
                 }
-                if (uploadState.customTrack != null) {
-                    GenrePill(
-                        label = "СВОЙ ТРЕК",
-                        active = uploadState.customSelected,
-                        onClick = onSelectCustomTrack
-                    )
-                }
+                // Одна кнопка «СВОЙ ТРЕК» того же размера, что жанры: без трека открывает QR,
+                // с треком включает его. Загрузить другой — маленький «+» рядом.
+                // Раньше здесь было две кнопки, и пятая не влезала: Row сжимал её почти до нуля,
+                // текст переносился по букве в строку, и вырастала вся нижняя панель.
+                val hasCustom = uploadState.customTrack != null
                 GenrePill(
-                    label = "Свой трек",
-                    active = false,
-                    onClick = onOpenUpload
+                    label = "СВОЙ ТРЕК",
+                    active = hasCustom && uploadState.customSelected,
+                    onClick = if (hasCustom) onSelectCustomTrack else onOpenUpload
                 )
+                if (hasCustom) {
+                    AddTrackPill(onClick = onOpenUpload)
+                }
             }
         }
         Row(
@@ -810,7 +901,30 @@ private fun GenrePill(
             color = Color.White,
             fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
             fontSize = 12.sp,
-            letterSpacing = 1.sp
+            letterSpacing = 1.sp,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
+/** Компактная круглая кнопка «загрузить другой трек», высотой как жанры. */
+@Composable
+private fun AddTrackPill(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(33.dp)
+            .clip(CircleShape)
+            .background(AeroPanelSoft)
+            .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Add,
+            contentDescription = "Загрузить другой трек",
+            tint = Color.White,
+            modifier = Modifier.size(18.dp)
         )
     }
 }

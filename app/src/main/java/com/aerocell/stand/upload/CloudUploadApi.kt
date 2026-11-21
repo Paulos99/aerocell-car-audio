@@ -19,13 +19,18 @@ data class CloudStatus(
     val status: String,
     val filename: String? = null,
     val extension: String? = null,
-    val size: Long? = null
+    val size: Long? = null,
+    /** Необязательный процент загрузки с телефона (0..100), если облако его отдаёт. */
+    val progress: Int? = null
 )
 
 interface CloudUploadApi {
     fun createSession(): CloudSession
     fun status(sessionId: String): CloudStatus
     fun downloadTo(sessionId: String, dest: File)
+
+    /** То же, но с долей скачанного 0..1. По умолчанию без прогресса. */
+    fun downloadTo(sessionId: String, dest: File, onProgress: (Float) -> Unit) = downloadTo(sessionId, dest)
     fun deleteSession(sessionId: String)
 }
 
@@ -60,11 +65,14 @@ class CloudUploadApiClient(
             status = body.optString("status", "waiting"),
             filename = body.optString("filename").ifBlank { null },
             extension = body.optString("extension").ifBlank { null },
-            size = if (body.has("size") && !body.isNull("size")) body.optLong("size") else null
+            size = if (body.has("size") && !body.isNull("size")) body.optLong("size") else null,
+            progress = parseProgress(body)
         )
     }
 
-    override fun downloadTo(sessionId: String, dest: File) {
+    override fun downloadTo(sessionId: String, dest: File) = downloadTo(sessionId, dest) { }
+
+    override fun downloadTo(sessionId: String, dest: File, onProgress: (Float) -> Unit) {
         val body = request("GET", "?action=download-url&session=${enc(sessionId)}")
         if (!body.optBoolean("ok", false)) {
             throw IOException("download url rejected")
@@ -76,9 +84,24 @@ class CloudUploadApiClient(
             if (!response.isSuccessful) {
                 throw IOException("download failed: ${response.code}")
             }
-            val bytes = response.body?.bytes() ?: throw IOException("empty download")
+            val responseBody = response.body ?: throw IOException("empty download")
+            val total = responseBody.contentLength()
             dest.parentFile?.mkdirs()
-            dest.writeBytes(bytes)
+            dest.outputStream().use { out ->
+                responseBody.byteStream().use { input ->
+                    val buf = ByteArray(64 * 1024)
+                    var written = 0L
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n <= 0) break
+                        out.write(buf, 0, n)
+                        written += n
+                        if (total > 0) onProgress((written.toFloat() / total).coerceIn(0f, 1f))
+                    }
+                }
+            }
+            if (dest.length() <= 0L) throw IOException("empty download")
+            onProgress(1f)
         }
     }
 
@@ -124,4 +147,12 @@ class CloudUploadApiClient(
             .callTimeout(120, TimeUnit.SECONDS)
             .build()
     }
+}
+
+/** Процент из ответа status: поле необязательное, всё вне 0..100 игнорируем. */
+internal fun parseProgress(body: JSONObject): Int? {
+    if (!body.has("progress") || body.isNull("progress")) return null
+    val raw = body.optDouble("progress", Double.NaN)
+    if (raw.isNaN() || raw < 0 || raw > 100) return null
+    return raw.toInt()
 }

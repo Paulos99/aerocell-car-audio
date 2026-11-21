@@ -83,6 +83,8 @@ class CloudUploadTransport(
         }
     }
 
+    override val reportsPhoneUpload: Boolean get() = true
+
     override fun onModalChanged(open: Boolean) {
         modalOpen.set(open)
         if (open) startPolling() else stopPolling()
@@ -117,6 +119,10 @@ class CloudUploadTransport(
         }
         when (status.status) {
             "ready" -> accept(current, status)
+            "waiting" -> if (status.filename != null) {
+                // Телефон уже получил ссылку и грузит файл в облако.
+                listener?.onPhoneUploading(status.filename, status.progress)
+            }
             "expired", "missing" -> {
                 session = null
                 failed = status.status == "missing"
@@ -133,7 +139,7 @@ class CloudUploadTransport(
         val dest = File(tempDir, "cloud-${current.sessionId}.$ext")
         try {
             tempDir.mkdirs()
-            api.downloadTo(current.sessionId, dest)
+            api.downloadTo(current.sessionId, dest) { listener?.onDownloadProgress(it) }
             if (!dest.exists() || dest.length() <= 0L) {
                 throw IOException("empty download")
             }
@@ -142,6 +148,7 @@ class CloudUploadTransport(
             listener?.onAccepted(dest, name, ext)
         } catch (_: Exception) {
             runCatching { dest.delete() }
+            listener?.onUploadFailed()
         } finally {
             downloading.set(false)
             listener?.onUploadFinished()

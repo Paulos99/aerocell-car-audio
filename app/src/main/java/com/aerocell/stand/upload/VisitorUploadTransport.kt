@@ -17,10 +17,22 @@ interface VisitorUploadTransport {
     /** Start or stop status polling. Default is a no-op (local HTTP does not poll). */
     fun onModalChanged(open: Boolean) {}
 
+    /** true, если транспорт отдельно сообщает, что телефон уже грузит файл (облако). */
+    val reportsPhoneUpload: Boolean get() = false
+
     interface Listener {
         fun onUploadStarted()
         fun onAccepted(tempFile: File, filename: String, extension: String)
         fun onUploadFinished()
+
+        /** Телефон начал загрузку в облако; имя файла и процент, если облако их отдаёт. */
+        fun onPhoneUploading(filename: String?, percent: Int?) {}
+
+        /** Планшет скачивает готовый файл: настоящая доля 0..1. */
+        fun onDownloadProgress(fraction: Float) {}
+
+        /** Загрузка сорвалась. */
+        fun onUploadFailed() {}
     }
 }
 

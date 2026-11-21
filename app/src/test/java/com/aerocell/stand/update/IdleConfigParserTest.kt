@@ -20,6 +20,9 @@ class IdleConfigParserTest {
         val idle = parse("""{"location": "sparta"}""")
         assertEquals(IdleConfig.DEFAULT_TIMEOUT_SEC, idle.timeoutSec)
         assertEquals(IdleConfig.DEFAULT_VIDEO_VOLUME, idle.videoVolume, 0.0001f)
+        // Простой по умолчанию: 2 минуты и без звука.
+        assertEquals(120, idle.timeoutSec)
+        assertEquals(0f, idle.videoVolume, 0.0001f)
     }
 
     @Test

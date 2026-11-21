@@ -12,6 +12,9 @@ data class UploadedTrack(
     val originalName: String
 )
 
+/** Этапы экрана загрузки своего трека на планшете. */
+enum class UploadStage { NONE, UPLOADING, PREPARING, DONE, FAILED }
+
 data class UploadUiState(
     val modalOpen: Boolean = false,
     val pageUrl: String? = null,
@@ -19,7 +22,12 @@ data class UploadUiState(
     val customSelected: Boolean = false,
     val justUploaded: Boolean = false,
     val uploading: Boolean = false,
-    val serverFailed: Boolean = false
+    val serverFailed: Boolean = false,
+    val stage: UploadStage = UploadStage.NONE,
+    /** Имя файла с телефона, как только облако его сообщило. */
+    val stageTrackName: String? = null,
+    /** Доля 0..1 внутри текущего этапа; null — неизвестно, рисуем бегущий блик. */
+    val stageProgress: Float? = null
 ) {
     val uploadUrl: String? get() = pageUrl
     val busy: Boolean get() = modalOpen || uploading
@@ -39,6 +47,10 @@ class UploadManager(
     private val tempDir = File(context.cacheDir, "upload-tmp")
     private var token: String = UploadTokens.generate()
     private var lastActivityAt = 0L
+
+    /** Через сколько без касаний выгружать трек посетителя (config.ownTrack.resetAfterMin). */
+    @Volatile
+    var resetAfterMs: Long = OwnTrackConfig().resetAfterMs
     private var track: UploadedTrack? = null
     private val transport: VisitorUploadTransport = transport ?: UploadTransports.create(
         tempDir = tempDir,
@@ -50,7 +62,44 @@ class UploadManager(
             if (track != null) {
                 lastActivityAt = SystemClock.elapsedRealtime()
             }
-            publish(uploading = true)
+            main.removeCallbacks(clearStage)
+            if (this@UploadManager.transport.reportsPhoneUpload) {
+                // Облако: файл уже там, планшет начинает его скачивать.
+                publish(uploading = true, stage = UploadStage.PREPARING, stageProgress = 0f)
+            } else {
+                publish(uploading = true, stage = UploadStage.UPLOADING, stageProgress = null)
+            }
+        }
+
+        override fun onPhoneUploading(filename: String?, percent: Int?) {
+            if (ui.stage == UploadStage.PREPARING || ui.stage == UploadStage.DONE) return
+            main.removeCallbacks(clearStage)
+            val next = percent?.coerceIn(0, 100)?.div(100f)
+            val prev = if (ui.stage == UploadStage.UPLOADING) ui.stageProgress else null
+            // Прогресс не идёт назад.
+            val progress = when {
+                next == null -> prev
+                prev == null -> next
+                else -> maxOf(prev, next)
+            }
+            publish(
+                uploading = true,
+                stage = UploadStage.UPLOADING,
+                stageTrackName = filename ?: ui.stageTrackName,
+                stageProgress = progress
+            )
+        }
+
+        override fun onDownloadProgress(fraction: Float) {
+            val next = fraction.coerceIn(0f, 1f)
+            val prev = if (ui.stage == UploadStage.PREPARING) ui.stageProgress ?: 0f else 0f
+            publish(uploading = true, stage = UploadStage.PREPARING, stageProgress = maxOf(prev, next))
+        }
+
+        override fun onUploadFailed() {
+            publish(uploading = false, stage = UploadStage.FAILED, stageProgress = null)
+            main.removeCallbacks(clearStage)
+            main.postDelayed(clearStage, FAILED_HOLD_MS)
         }
 
         override fun onAccepted(tempFile: File, filename: String, extension: String) {
@@ -59,6 +108,12 @@ class UploadManager(
 
         override fun onUploadFinished() {
             if (ui.uploading) publish(uploading = false)
+        }
+    }
+
+    private val clearStage = Runnable {
+        if (ui.stage == UploadStage.DONE || ui.stage == UploadStage.FAILED) {
+            publish(stage = UploadStage.NONE, stageTrackName = null, stageProgress = null)
         }
     }
 
@@ -118,17 +173,13 @@ class UploadManager(
         }
     }
 
-    fun markPlaying(playing: Boolean) {
-        if (playing && ui.customSelected && track != null) {
-            lastActivityAt = SystemClock.elapsedRealtime()
-        }
-    }
-
-    fun shouldExpireSession(now: Long = SystemClock.elapsedRealtime()): Boolean {
-        val started = lastActivityAt
-        if (track == null || started == 0L) return false
-        return now - started >= UploadConfig.SESSION_TIMEOUT_MS
-    }
+    fun shouldExpireSession(now: Long = SystemClock.elapsedRealtime()): Boolean =
+        OwnTrackReset.shouldReset(
+            hasTrack = track != null,
+            lastTouchAt = lastActivityAt,
+            now = now,
+            timeoutMs = resetAfterMs
+        )
 
     fun expireSessionIfNeeded(): Boolean {
         if (!shouldExpireSession()) return false
@@ -148,7 +199,10 @@ class UploadManager(
             justUploaded = false,
             uploading = false,
             pageUrl = null,
-            serverFailed = false
+            serverFailed = false,
+            stage = UploadStage.NONE,
+            stageTrackName = null,
+            stageProgress = null
         )
         refreshNetwork()
         if (had && notify) {
@@ -184,14 +238,22 @@ class UploadManager(
         val link = runCatching { transport.currentLink(token) }
             .getOrElse { UploadLink(pageUrl = null, available = false, failed = true) }
         publish(
+            modalOpen = false,
             customTrack = uploaded,
             customSelected = true,
             justUploaded = true,
             uploading = false,
             pageUrl = link.pageUrl,
-            serverFailed = link.failed
+            serverFailed = link.failed,
+            stage = UploadStage.DONE,
+            stageTrackName = ui.stageTrackName ?: filename,
+            stageProgress = 1f
         )
-        main.post { onTrackReady(uploaded) }
+        transport.onModalChanged(false)
+        // Галочка и плавный уход в чёрный, потом музыка.
+        main.postDelayed({ if (track === uploaded) onTrackReady(uploaded) }, DONE_HOLD_MS)
+        main.removeCallbacks(clearStage)
+        main.postDelayed(clearStage, DONE_HOLD_MS)
     }
 
     private fun publish(
@@ -201,7 +263,10 @@ class UploadManager(
         customSelected: Boolean = ui.customSelected,
         justUploaded: Boolean = ui.justUploaded,
         uploading: Boolean = ui.uploading,
-        serverFailed: Boolean = ui.serverFailed
+        serverFailed: Boolean = ui.serverFailed,
+        stage: UploadStage = ui.stage,
+        stageTrackName: String? = ui.stageTrackName,
+        stageProgress: Float? = ui.stageProgress
     ) {
         val next = UploadUiState(
             modalOpen = modalOpen,
@@ -210,7 +275,10 @@ class UploadManager(
             customSelected = customSelected,
             justUploaded = justUploaded,
             uploading = uploading,
-            serverFailed = serverFailed
+            serverFailed = serverFailed,
+            stage = stage,
+            stageTrackName = stageTrackName,
+            stageProgress = stageProgress
         )
         ui = next
         val listener = onStateChanged
@@ -221,5 +289,10 @@ class UploadManager(
                 main.post { listener(next) }
             }
         }
+    }
+
+    companion object {
+        const val DONE_HOLD_MS = 1_300L
+        const val FAILED_HOLD_MS = 3_500L
     }
 }

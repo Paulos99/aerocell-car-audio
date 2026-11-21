@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Чёрная заставка с логотипом: тот же размер и место, что на экране обновления (360 dp по центру). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@android:color/black" />
+    <item
+        android:width="360dp"
+        android:height="216dp"
+        android:gravity="center"
+        android:drawable="@drawable/aerocell_qp_logo" />
+</layer-list>

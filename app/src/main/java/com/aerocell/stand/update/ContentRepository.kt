@@ -36,7 +36,16 @@ data class SyncState(
     val apkProgress: Float? = null,
     val apkInstalling: Boolean = false,
     val needInstallPermission: Boolean = false,
-    val statusText: String? = null
+    val statusText: String? = null,
+    /** Время последней попытки проверить облако (System.currentTimeMillis). */
+    val lastCheckAtMs: Long? = null,
+    /** Удалась ли последняя попытка; null — ещё не проверяли. */
+    val lastCheckOk: Boolean? = null,
+    /** Версия APK, которая сейчас лежит в манифесте облака. */
+    val cloudVersionName: String? = null,
+    val cloudVersionCode: Int? = null,
+    /** Растёт на каждую упавшую установку, чтобы экран мог на неё отреагировать. */
+    val installFailures: Int = 0
 )
 
 class ContentRepository(private val context: Context) {
@@ -104,7 +113,6 @@ class ContentRepository(private val context: Context) {
     }
 
     fun idleConfig(): IdleConfig = loadCachedManifest()?.config?.idle ?: IdleConfig()
-    fun kioskConfig(): KioskConfig = loadCachedManifest()?.config?.kiosk ?: KioskConfig()
 
     fun localMediaFile(file: ContentFile): File {
         val ext = extensionFor(file)
@@ -116,11 +124,23 @@ class ContentRepository(private val context: Context) {
         return File(updatesDir, name)
     }
 
-    suspend fun start(wifiOnly: Boolean) {
-        refresh(wifiOnly = wifiOnly, enqueueWorker = true)
-    }
+    fun ownTrackConfig(): com.aerocell.stand.upload.OwnTrackConfig =
+        loadCachedManifest()?.config?.ownTrack ?: com.aerocell.stand.upload.OwnTrackConfig()
 
-    suspend fun refresh(wifiOnly: Boolean, enqueueWorker: Boolean) {
+    fun updateConfig(): UpdateConfig = loadCachedManifest()?.config?.update ?: UpdateConfig()
+
+    /**
+     * Проверяет манифест в облаке. Манифест и APK лёгкие, поэтому идут по любой сети.
+     * Тяжёлые медиа (видео простоя, треки) по умолчанию качаются только по безлимитной сети
+     * (Wi-Fi); [mediaAnyNetwork] = true снимает это ограничение (ручная проверка из меню).
+     *
+     * @return true, если манифест удалось получить.
+     */
+    suspend fun refresh(
+        wifiOnly: Boolean = false,
+        enqueueWorker: Boolean = true,
+        mediaAnyNetwork: Boolean = false
+    ): Boolean {
         val cached = loadCachedManifest()
         if (cached != null) applyManifestToState(cached, downloading = false)
 
@@ -133,10 +153,12 @@ class ContentRepository(private val context: Context) {
                     offline = true,
                     noWifi = false,
                     lastError = null,
-                    statusText = if (cached != null) "Нет сети — работаю из кэша" else "Нет сети"
+                    statusText = if (cached != null) "Нет сети — работаю из кэша" else "Нет сети",
+                    lastCheckAtMs = System.currentTimeMillis(),
+                    lastCheckOk = false
                 )
             }
-            return
+            return false
         }
         if (wifiOnly && !wifi) {
             _state.update {
@@ -145,17 +167,19 @@ class ContentRepository(private val context: Context) {
                     offline = false,
                     noWifi = true,
                     lastError = null,
-                    statusText = if (cached != null) "Нет Wi-Fi — работаю из кэша" else "Нет Wi-Fi"
+                    statusText = if (cached != null) "Нет Wi-Fi — работаю из кэша" else "Нет Wi-Fi",
+                    lastCheckAtMs = System.currentTimeMillis(),
+                    lastCheckOk = false
                 )
             }
-            return
+            return false
         }
 
         _state.update {
             it.copy(checking = true, offline = false, noWifi = false, lastError = null, statusText = "Проверяю обновления…")
         }
         val result = withContext(Dispatchers.IO) { fetchManifestRaw() }
-        result.fold(
+        return result.fold(
             onSuccess = { (manifest, raw) ->
                 saveManifest(manifest, raw)
                 applyManifestToState(manifest, downloading = false)
@@ -164,21 +188,27 @@ class ContentRepository(private val context: Context) {
                     it.copy(
                         checking = false,
                         lastError = null,
-                        statusText = if (pending.isEmpty()) "Контент актуален" else "Обновление контента…"
+                        statusText = if (pending.isEmpty()) "Контент актуален" else "Обновление контента…",
+                        lastCheckAtMs = System.currentTimeMillis(),
+                        lastCheckOk = true
                     )
                 }
                 if (enqueueWorker && pending.isNotEmpty()) {
-                    enqueueSync(forceNetwork = !wifiOnly)
+                    enqueueSync(forceNetwork = mediaAnyNetwork)
                 }
+                true
             },
             onFailure = { error ->
                 _state.update {
                     it.copy(
                         checking = false,
                         lastError = error.message,
-                        statusText = if (cached != null) "Не удалось проверить — работаю из кэша" else "Не удалось проверить обновления"
+                        statusText = if (cached != null) "Не удалось проверить — работаю из кэша" else "Не удалось проверить обновления",
+                        lastCheckAtMs = System.currentTimeMillis(),
+                        lastCheckOk = false
                     )
                 }
+                false
             }
         )
     }
@@ -345,6 +375,22 @@ class ContentRepository(private val context: Context) {
         _state.update { it.copy(apkInstalling = true, statusText = "Установка обновления…") }
     }
 
+    fun clearInstalling() {
+        _state.update { it.copy(apkInstalling = false) }
+    }
+
+    /** Установка упала (сообщил PackageInstaller или вышел таймаут). */
+    fun reportInstallFailed(message: String) {
+        _state.update {
+            it.copy(
+                apkInstalling = false,
+                lastError = message,
+                statusText = "Не удалось установить обновление",
+                installFailures = it.installFailures + 1
+            )
+        }
+    }
+
     fun markNeedInstallPermission(needed: Boolean) {
         _state.update { it.copy(needInstallPermission = needed) }
     }
@@ -369,6 +415,8 @@ class ContentRepository(private val context: Context) {
                 updateRequired = updateRequired,
                 updateVersionName = if (updateAvailable) apk?.versionName else it.updateVersionName.takeIf { updateAvailable },
                 updateVersionCode = if (updateAvailable) apk?.versionCode else null,
+                cloudVersionName = apk?.versionName,
+                cloudVersionCode = apk?.versionCode,
                 offline = false
             )
         }

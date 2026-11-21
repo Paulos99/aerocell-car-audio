@@ -15,6 +15,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -92,9 +93,24 @@ class MainActivity : ComponentActivity() {
                             }
                             viewModel.startApkUpdate()
                         },
-                        onExitKiosk = viewModel::exitKioskTemporarily,
+                        onExitKiosk = { viewModel.exitKioskTemporarily() },
                         onResumeKiosk = viewModel::resumeKiosk,
-                        onClearKiosk = viewModel::clearKiosk
+                        onClearKiosk = { viewModel.clearKiosk() },
+                        onHintPan = viewModel::setPanFromHint,
+                        onFaderBoundsInWindow = { faderBounds = it },
+                        onOpenHelp = viewModel::openHelp,
+                        onCloseHelp = viewModel::closeHelp,
+                        onOpenWifi = viewModel::openWifi,
+                        onCloseWifi = viewModel::closeWifi,
+                        onRescanWifi = viewModel::scanWifi,
+                        onConnectWifi = viewModel::connectWifi,
+                        onOpenWifiSettings = {
+                            val intent = viewModel.wifiSettingsIntent()
+                            try {
+                                startActivity(intent)
+                            } catch (_: Throwable) {
+                            }
+                        }
                     )
                 }
             }
@@ -104,9 +120,30 @@ class MainActivity : ComponentActivity() {
     /** true, пока «съедаем» жест, который разбудил стенд. */
     private var swallowWakeGesture = false
 
+    /** Границы ползунка баланса в координатах окна: касание по нему во время подсказки не съедаем. */
+    private var faderBounds: Rect? = null
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         val action = ev.actionMasked
-        if (action == MotionEvent.ACTION_DOWN && viewModel.state.value.idleActive) {
+        val s = viewModel.state.value
+        if (s.updateScreen != null) {
+            // Пока идёт обновление, экран касания не принимает.
+            return true
+        }
+        if (action == MotionEvent.ACTION_DOWN && !s.idleActive && s.onboarding.hintVisible) {
+            viewModel.onUserInteraction()
+            viewModel.dismissHint()
+            val onFader = faderBounds?.let { b ->
+                // Чуть шире самого ползунка, чтобы палец посетителя попадал наверняка.
+                ev.x in (b.left - 24f)..(b.right + 24f) && ev.y in (b.top - 24f)..(b.bottom + 24f)
+            } ?: false
+            if (!onFader) {
+                swallowWakeGesture = true
+                return true
+            }
+            return super.dispatchTouchEvent(ev)
+        }
+        if (action == MotionEvent.ACTION_DOWN && s.idleActive) {
             // Первое касание только будит стенд и не доходит до кнопок под экраном простоя.
             swallowWakeGesture = true
             viewModel.wakeFromIdle()

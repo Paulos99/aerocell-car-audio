@@ -1,6 +1,5 @@
 package com.aerocell.stand.update
 
-import com.aerocell.stand.kiosk.KioskPolicy
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -38,7 +37,8 @@ data class ContentConfig(
     val location: String?,
     val rawJson: String?,
     val idle: IdleConfig = IdleConfig(),
-    val kiosk: KioskConfig = KioskConfig()
+    val update: UpdateConfig = UpdateConfig(),
+    val ownTrack: com.aerocell.stand.upload.OwnTrackConfig = com.aerocell.stand.upload.OwnTrackConfig()
 )
 
 /** Настройки режима простоя из config.idle манифеста. */
@@ -47,16 +47,11 @@ data class IdleConfig(
     val videoVolume: Float = DEFAULT_VIDEO_VOLUME
 ) {
     companion object {
-        const val DEFAULT_TIMEOUT_SEC = 90
-        const val DEFAULT_VIDEO_VOLUME = 0.25f
+        const val DEFAULT_TIMEOUT_SEC = 120
+        const val DEFAULT_VIDEO_VOLUME = 0f
         const val MIN_TIMEOUT_SEC = 10
     }
 }
-
-/** Настройки киоска из config.kiosk манифеста. */
-data class KioskConfig(
-    val pin: String = KioskPolicy.DEFAULT_PIN
-)
 
 object ContentManifestParser {
     fun parse(text: String): ContentManifest {
@@ -97,7 +92,8 @@ object ContentManifestParser {
                 location = it.optionalString("location"),
                 rawJson = it.toString(),
                 idle = parseIdle(it.optJSONObject("idle")),
-                kiosk = parseKiosk(it.optJSONObject("kiosk"))
+                update = parseUpdate(it.optJSONObject("update")),
+                ownTrack = com.aerocell.stand.upload.OwnTrackConfig.parse(it.optJSONObject("ownTrack"))
             )
         }
         return ContentManifest(
@@ -122,9 +118,26 @@ object ContentManifestParser {
         return IdleConfig(timeoutSec = timeout, videoVolume = volume)
     }
 
-    fun parseKiosk(kiosk: JSONObject?): KioskConfig {
-        if (kiosk == null) return KioskConfig()
-        return KioskConfig(pin = KioskPolicy.resolvePin(kiosk.optString("pin", "")))
+    fun parseUpdate(update: JSONObject?): UpdateConfig {
+        if (update == null) return UpdateConfig()
+        val interval = update.optInt("checkIntervalMin", UpdateConfig.DEFAULT_CHECK_INTERVAL_MIN)
+            .takeIf { it > 0 }
+            ?.coerceAtLeast(UpdateConfig.MIN_CHECK_INTERVAL_MIN)
+            ?: UpdateConfig.DEFAULT_CHECK_INTERVAL_MIN
+        val idleSec = update.optInt("installAfterIdleSec", UpdateConfig.DEFAULT_INSTALL_AFTER_IDLE_SEC)
+            .takeIf { it > 0 }
+            ?.coerceAtLeast(UpdateConfig.MIN_INSTALL_AFTER_IDLE_SEC)
+            ?: UpdateConfig.DEFAULT_INSTALL_AFTER_IDLE_SEC
+        val buttonAfter = update.optInt("buttonAfterMin", UpdateConfig.DEFAULT_BUTTON_AFTER_MIN)
+            .takeIf { it > 0 }
+            ?.coerceAtLeast(UpdateConfig.MIN_BUTTON_AFTER_MIN)
+            ?: UpdateConfig.DEFAULT_BUTTON_AFTER_MIN
+        return UpdateConfig(
+            checkIntervalMin = interval,
+            installAfterIdleSec = idleSec,
+            quietHours = QuietHours.parse(update.optionalString("quietHours")),
+            buttonAfterMin = buttonAfter
+        )
     }
 
     private fun JSONObject.optionalString(key: String): String? {

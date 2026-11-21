@@ -1,7 +1,10 @@
 package com.aerocell.stand
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
@@ -9,14 +12,25 @@ import androidx.lifecycle.viewModelScope
 import com.aerocell.stand.audio.StandPlayer
 import com.aerocell.stand.audio.StandTrack
 import com.aerocell.stand.kiosk.KioskController
-import com.aerocell.stand.kiosk.KioskPolicy
+import com.aerocell.stand.onboarding.Onboarding
+import com.aerocell.stand.onboarding.OnboardingState
+import com.aerocell.stand.update.ApkInfo
 import com.aerocell.stand.update.ApkInstaller
+import com.aerocell.stand.update.CheckOrigin
 import com.aerocell.stand.update.ContentRepository
 import com.aerocell.stand.update.IdleConfig
+import com.aerocell.stand.update.RestartOutcome
+import com.aerocell.stand.update.Sha256
 import com.aerocell.stand.update.SyncState
+import com.aerocell.stand.update.UpdateButton
+import com.aerocell.stand.update.UpdateFlagStore
+import com.aerocell.stand.update.UpdateInputs
+import com.aerocell.stand.update.UpdatePolicy
 import com.aerocell.stand.upload.UploadManager
 import com.aerocell.stand.upload.UploadUiState
 import com.aerocell.stand.upload.UploadedTrack
+import com.aerocell.stand.wifi.WifiController
+import com.aerocell.stand.wifi.WifiNetwork
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -27,6 +41,17 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Calendar
+
+enum class UpdateScreenPhase { PREPARING, INSTALLING, DONE }
+
+/** Полноэкранный экран «Обновляем стенд». */
+data class UpdateScreenState(
+    val phase: UpdateScreenPhase,
+    val versionName: String,
+    /** 0..1 — запись APK в сессию установки; null — без шкалы. */
+    val progress: Float? = null
+)
 
 data class StandUiState(
     val track: StandTrack = StandTrack.Club,
@@ -53,7 +78,41 @@ data class StandUiState(
     val idleTimeoutSec: Int = IdleConfig.DEFAULT_TIMEOUT_SEC,
     val idleVideoVolume: Float = IdleConfig.DEFAULT_VIDEO_VOLUME,
     val kioskEnabled: Boolean = false,
-    val kioskLockTaskDesired: Boolean = false
+    val kioskLockTaskDesired: Boolean = false,
+    /** Плашка «Вышла версия … · Обновить» на главном экране. */
+    val updateButton: UpdateButton = UpdateButton.NONE,
+    /** Версия, которая скачана и проверена и ждёт установки. */
+    val readyVersionName: String? = null,
+    /** Нажали «Обновить», идёт установка с подтверждением системы. */
+    val updateButtonBusy: Boolean = false,
+    val updateScreen: UpdateScreenState? = null,
+    /** Состояние обновления для служебного меню. */
+    val updateStatus: String? = null,
+    val lastCheckAtMs: Long? = null,
+    val lastCheckOk: Boolean? = null,
+    val nextCheckAtMs: Long? = null,
+    val cloudVersionName: String? = null,
+    val cloudVersionCode: Int? = null,
+    val onboarding: OnboardingState = OnboardingState(),
+    val wifi: WifiUiState = WifiUiState()
+)
+
+data class WifiUiState(
+    val open: Boolean = false,
+    val scanning: Boolean = false,
+    val networks: List<WifiNetwork> = emptyList(),
+    val currentSsid: String? = null,
+    val connectingTo: String? = null,
+    val message: String? = null,
+    val error: Boolean = false
+)
+
+/** APK новой версии, скачанный и проверенный по sha256. */
+private data class ReadyApk(
+    val apk: ApkInfo,
+    val file: File,
+    val origin: CheckOrigin,
+    val readyAtElapsed: Long
 )
 
 class StandViewModel(application: Application) : AndroidViewModel(application) {
@@ -62,6 +121,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
     private val installer = ApkInstaller(application)
     private val kiosk = KioskController(application)
     private val player = StandPlayer(application)
+    private val wifi = WifiController(application)
     private val _state = MutableStateFlow(
         StandUiState(
             kioskEnabled = kiosk.isDeviceOwner(),
@@ -73,14 +133,32 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
     val upload: StateFlow<UploadUiState> = _upload
     private val uploads = UploadManager(
         context = application,
-        onTrackReady = { playCustom(it, autoplay = true) },
+        onTrackReady = { playCustomFadingIn(it) },
         onSessionExpired = { onCustomSessionExpired() }
     )
     private var ticker: Job? = null
+    private var resettingOwnTrack = false
     private var pendingInstall = false
     private var cacheBoundFor: StandTrack? = null
     @Volatile private var lastInteractionAt = SystemClock.elapsedRealtime()
-    private var autoInstallAttemptedFor: Int? = null
+
+    // --- обновления ---
+    private val updateFlags = UpdateFlagStore(application)
+    /** С запуска приложения экран никто не трогал: на старте можно ставить сразу. */
+    @Volatile private var untouchedSinceStart = true
+    private var readyApk: ReadyApk? = null
+    private var downloadJob: Job? = null
+    private var downloadError: String? = null
+    @Volatile private var checking = false
+    private var lastCheckFailed = false
+    private var lastCheckAttemptElapsed: Long? = null
+    /** Идёт установка; installingSilently — тихая или с подтверждением системы. */
+    private var installing = false
+    private var installingSilently = false
+    private var installTimeout: Job? = null
+    private var silentFailedFor: Int? = null
+    private var seenInstallFailures = 0
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     init {
         uploads.onStateChanged = { _upload.value = it }
@@ -96,18 +174,22 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { idleWatchdog() }
         ticker = viewModelScope.launch {
             while (isActive) {
-                uploads.expireSessionIfNeeded()
-                uploads.markPlaying(_state.value.playing && _upload.value.customSelected)
+                if (!resettingOwnTrack && uploads.shouldExpireSession()) {
+                    resettingOwnTrack = true
+                    viewModelScope.launch { resetOwnTrack() }
+                }
                 publish()
                 delay(80)
             }
         }
+        seenInstallFailures = repository.state.value.installFailures
         viewModelScope.launch {
             repository.state.collect { sync -> applySync(sync) }
         }
-        viewModelScope.launch {
-            repository.start(wifiOnly = true)
-        }
+        _state.update { it.copy(onboarding = Onboarding.onStart(it.onboarding)) }
+        resumeUpdateScreenAfterRestart()
+        viewModelScope.launch { updateScheduler() }
+        registerNetworkCallback()
     }
 
     fun selectTrack(track: StandTrack) {
@@ -185,9 +267,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setPan(pan: Float) {
         uploads.touch()
-        val next = pan.coerceIn(-1f, 1f)
-        player.applyPan(next)
-        _state.update { it.copy(pan = next) }
+        applyPan(pan)
     }
 
     fun setVolume(volume: Float) {
@@ -200,6 +280,8 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
     /** Любое касание экрана: сбрасывает таймер простоя. */
     fun onUserInteraction() {
         lastInteractionAt = SystemClock.elapsedRealtime()
+        uploads.touch()
+        untouchedSinceStart = false
     }
 
     /** Кнопка «Показать режим простоя» в служебном меню. */
@@ -211,8 +293,9 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
     /** Первое касание в режиме простоя: только будит стенд. */
     fun wakeFromIdle() {
         lastInteractionAt = SystemClock.elapsedRealtime()
+        untouchedSinceStart = false
         if (_state.value.idleActive) {
-            _state.update { it.copy(idleActive = false) }
+            _state.update { it.copy(idleActive = false, onboarding = Onboarding.onWake(it.onboarding)) }
         }
     }
 
@@ -225,6 +308,8 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         _state.update {
             it.copy(
                 idleActive = true,
+                onboarding = Onboarding.onEnterIdle(it.onboarding),
+                wifi = WifiUiState(),
                 // После работы персонала киоск снова запирается, когда стенд уходит в простой.
                 kioskLockTaskDesired = if (it.kioskEnabled) true else it.kioskLockTaskDesired
             )
@@ -243,35 +328,18 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
             val s = _state.value
             val now = SystemClock.elapsedRealtime()
             // Пока играет музыка, открыто меню или окно своего трека,
-            // идёт загрузка файла или обновление, стенд не «простаивает».
-            if (player.isPlaying || s.serviceMenuVisible || s.apkBusy || visitorBusy()) {
+            // идёт загрузка файла или установка обновления, стенд не «простаивает».
+            // Фоновое скачивание APK простою не мешает.
+            if (player.isPlaying || s.serviceMenuVisible || installing || s.updateScreen != null || visitorBusy()) {
                 lastInteractionAt = now
-                continue
-            }
-            if (!s.idleActive && now - lastInteractionAt >= s.idleTimeoutSec * 1_000L) {
+            } else if (Onboarding.blocksIdle(s.onboarding)) {
+                // Помощь держит стенд, но сама закрывается после 2 минут без касаний.
+                if (Onboarding.shouldAutoCloseHelp(s.onboarding, now - lastInteractionAt)) closeHelp()
+            } else if (!s.idleActive && now - lastInteractionAt >= s.idleTimeoutSec * 1_000L) {
                 enterIdle()
             }
-            maybeAutoInstall()
+            evaluateUpdate()
         }
-    }
-
-    private fun maybeAutoInstall() {
-        val sync = repository.state.value
-        val s = _state.value
-        if (!KioskPolicy.shouldAutoInstall(
-                isDeviceOwner = kiosk.isDeviceOwner(),
-                updateAvailable = s.updateAvailable,
-                apkBusy = s.apkBusy,
-                serviceMenuVisible = s.serviceMenuVisible,
-                playing = player.isPlaying,
-                idleActive = s.idleActive,
-                visitorBusy = visitorBusy()
-            )
-        ) return
-        val versionCode = sync.updateVersionCode ?: return
-        if (autoInstallAttemptedFor == versionCode) return
-        autoInstallAttemptedFor = versionCode
-        viewModelScope.launch { performApkUpdate(silent = true) }
     }
 
     private fun refreshIdleContent() {
@@ -286,27 +354,134 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // --- подсказка и помощь ---
+
+    /** Любое касание во время подсказки: закрываем её, ползунок возвращаем в центр. */
+    fun dismissHint() {
+        val s = _state.value
+        if (!s.onboarding.hintVisible) return
+        _state.update { it.copy(onboarding = Onboarding.onTouch(it.onboarding)) }
+        applyPan(0f)
+    }
+
+    /** Палец подсказки ведёт настоящий ползунок; если играет музыка, баланс реально меняется. */
+    fun setPanFromHint(pan: Float) {
+        if (!_state.value.onboarding.hintVisible) return
+        applyPan(pan)
+    }
+
+    private fun applyPan(pan: Float) {
+        val next = pan.coerceIn(-1f, 1f)
+        player.applyPan(next)
+        _state.update { it.copy(pan = next) }
+    }
+
+    fun openHelp() {
+        onUserInteraction()
+        _state.update { it.copy(onboarding = Onboarding.openHelp(it.onboarding)) }
+    }
+
+    fun closeHelp() {
+        _state.update { it.copy(onboarding = Onboarding.closeHelp(it.onboarding)) }
+    }
+
+    // --- Wi-Fi из служебного меню ---
+
+    fun openWifi() {
+        _state.update { it.copy(wifi = WifiUiState(open = true, currentSsid = wifi.currentSsid())) }
+        scanWifi()
+    }
+
+    fun closeWifi() {
+        _state.update { it.copy(wifi = WifiUiState()) }
+    }
+
+    fun scanWifi() {
+        if (_state.value.wifi.scanning) return
+        _state.update { it.copy(wifi = it.wifi.copy(scanning = true, message = null, error = false)) }
+        viewModelScope.launch {
+            try {
+                val list = wifi.scan()
+                _state.update {
+                    it.copy(
+                        wifi = it.wifi.copy(
+                            scanning = false,
+                            networks = list,
+                            currentSsid = wifi.currentSsid(),
+                            message = if (list.isEmpty()) "Сетей не нашлось. Обновите список" else null
+                        )
+                    )
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "wifi scan failed", t)
+                _state.update {
+                    it.copy(wifi = it.wifi.copy(scanning = false, message = "Список сетей недоступен: ${t.message}", error = true))
+                }
+            }
+        }
+    }
+
+    fun connectWifi(network: WifiNetwork, password: String) {
+        _state.update { it.copy(wifi = it.wifi.copy(connectingTo = network.ssid, message = "Подключаюсь к ${network.ssid}…", error = false)) }
+        viewModelScope.launch {
+            val error = wifi.connect(network, password)
+            _state.update {
+                it.copy(
+                    wifi = it.wifi.copy(
+                        connectingTo = null,
+                        currentSsid = wifi.currentSsid(),
+                        message = error ?: "Подключено к ${network.ssid}",
+                        error = error != null
+                    )
+                )
+            }
+            if (error == null) runCheck(CheckOrigin.MANUAL)
+        }
+    }
+
+    /** Запасной путь: системная панель Wi-Fi. В киоске на это время снимаем блокировку. */
+    fun wifiSettingsIntent(): Intent {
+        _state.update { it.copy(kioskLockTaskDesired = false, wifi = WifiUiState(), serviceMenuVisible = false) }
+        return wifi.settingsIntent()
+    }
+
     fun onLogoLongPress() {
         _state.update { it.copy(serviceMenuVisible = true) }
     }
 
     fun dismissServiceMenu() {
-        _state.update { it.copy(serviceMenuVisible = false) }
+        _state.update { it.copy(serviceMenuVisible = false, wifi = WifiUiState()) }
     }
 
+    /** Запасной путь: «Проверить обновления» в служебном меню. Медиа тоже качаем по любой сети. */
     fun checkUpdates() {
+        viewModelScope.launch { runCheck(CheckOrigin.MANUAL, mediaAnyNetwork = true) }
+    }
+
+    /** Кнопка «Обновить» на главном экране или в служебном меню. */
+    fun startApkUpdate() {
         viewModelScope.launch {
-            repository.refresh(wifiOnly = false, enqueueWorker = true)
+            if (installing) {
+                reportUpdateProblem("Обновление уже ставится")
+                return@launch
+            }
+            val ready = readyApk ?: prefetchApk(CheckOrigin.MANUAL)
+            if (ready == null) {
+                reportUpdateProblem(
+                    downloadError?.let { "Не удалось скачать обновление: $it" }
+                        ?: "В облаке нет версии новее ${BuildConfig.VERSION_NAME}"
+                )
+                return@launch
+            }
+            // Ручное нажатие ставит сразу, не дожидаясь простоя.
+            val silentPossible = kiosk.isDeviceOwner() && silentFailedFor != ready.apk.versionCode
+            if (silentPossible) installSilently(ready) else installWithSystem(ready)
         }
     }
 
-    fun startApkUpdate() {
-        viewModelScope.launch { performApkUpdate(silent = false) }
-    }
-
-    fun exitKioskTemporarily(pin: String): Boolean {
+    /** «Выйти из киоска» в служебном меню: блокировка снимается до следующего простоя. */
+    fun exitKioskTemporarily(): Boolean {
         if (!kiosk.isDeviceOwner()) return false
-        if (!KioskPolicy.pinMatches(pin, repository.kioskConfig().pin)) return false
         _state.update { it.copy(kioskLockTaskDesired = false, serviceMenuVisible = false) }
         return true
     }
@@ -316,9 +491,9 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(kioskEnabled = true, kioskLockTaskDesired = true) }
     }
 
-    fun clearKiosk(pin: String): Boolean {
+    /** «Снять режим киоска» после подтверждения «Вы уверены?». */
+    fun clearKiosk(): Boolean {
         if (!kiosk.isDeviceOwner()) return false
-        if (!KioskPolicy.pinMatches(pin, repository.kioskConfig().pin)) return false
         return try {
             kiosk.clearDeviceOwner()
             _state.update {
@@ -340,7 +515,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         if (pendingInstall && installer.canInstall()) {
             pendingInstall = false
             repository.markNeedInstallPermission(false)
-            viewModelScope.launch { performApkUpdate(silent = false) }
+            readyApk?.let { ready -> viewModelScope.launch { installWithSystem(ready) } }
         }
         maybeBindCachedTrack()
         val owner = kiosk.isDeviceOwner()
@@ -358,39 +533,328 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         return if (installer.canInstall()) null else installer.permissionSettingsIntent()
     }
 
-    private suspend fun performApkUpdate(silent: Boolean) {
-        val manifest = repository.loadCachedManifest()
-        val apk = manifest?.apk ?: return
-        if (apk.versionCode <= BuildConfig.VERSION_CODE) return
-        if (!apk.applicationId.isNullOrBlank() && apk.applicationId != BuildConfig.APPLICATION_ID) return
-        val allowSilent = silent && kiosk.isDeviceOwner()
-        if (!allowSilent && !installer.canInstall()) {
-            pendingInstall = true
-            repository.markNeedInstallPermission(true)
-            return
-        }
-        try {
-            val file = withContext(Dispatchers.IO) { repository.downloadApk(apk) }
-            val s = _state.value
-            if (allowSilent && (
-                    player.isPlaying ||
-                        s.serviceMenuVisible ||
-                        visitorBusy() ||
-                        !s.idleActive
-                    )
-            ) {
-                // Скачали, но демонстрация уже началась — поставим, когда стенд снова простаивает.
-                autoInstallAttemptedFor = null
-                return
-            }
-            repository.markInstalling()
-            installer.install(file, silent = allowSilent)
-        } catch (t: Throwable) {
-            repository.reportError(t.message ?: "Не удалось установить обновление")
+    // ---------------------------------------------------------------------
+    // Обновления: проверка облака, скачивание заранее, установка без рывка
+    // ---------------------------------------------------------------------
+
+    /** Проверка при запуске, затем по таймеру из config.update.checkIntervalMin. */
+    private suspend fun updateScheduler() {
+        runCheck(CheckOrigin.STARTUP)
+        while (true) {
+            delay(SCHEDULER_TICK_MS)
+            val due = UpdatePolicy.isCheckDue(
+                nowMs = SystemClock.elapsedRealtime(),
+                lastAttemptMs = lastCheckAttemptElapsed,
+                config = repository.updateConfig()
+            )
+            if (due && !installing) runCheck(CheckOrigin.BACKGROUND)
         }
     }
 
+    private suspend fun runCheck(origin: CheckOrigin, mediaAnyNetwork: Boolean = false) {
+        if (checking) return
+        checking = true
+        lastCheckAttemptElapsed = SystemClock.elapsedRealtime()
+        try {
+            // Манифест и APK идут по любой сети; config и контент обновляются как раньше.
+            val ok = repository.refresh(enqueueWorker = true, mediaAnyNetwork = mediaAnyNetwork)
+            lastCheckFailed = !ok
+            prefetchApk(origin)
+        } finally {
+            checking = false
+            publishNextCheck()
+        }
+    }
+
+    private fun publishNextCheck() {
+        val last = repository.state.value.lastCheckAtMs
+        val interval = UpdatePolicy.checkIntervalMs(repository.updateConfig())
+        _state.update { it.copy(nextCheckAtMs = last?.plus(interval)) }
+    }
+
+    /**
+     * Если в облаке версия новее, заранее качаем APK и сверяем sha256.
+     * Возвращает готовый к установке APK или null.
+     */
+    private suspend fun prefetchApk(origin: CheckOrigin): ReadyApk? {
+        val apk = repository.loadCachedManifest()?.apk
+        if (apk == null ||
+            apk.versionCode <= BuildConfig.VERSION_CODE ||
+            (!apk.applicationId.isNullOrBlank() && apk.applicationId != BuildConfig.APPLICATION_ID)
+        ) {
+            readyApk = null
+            _state.update { it.copy(readyVersionName = null, updateButton = UpdateButton.NONE) }
+            return null
+        }
+        readyApk?.let { ready ->
+            if (ready.apk.versionCode == apk.versionCode && ready.apk.sha256 == apk.sha256 && ready.file.isFile) {
+                return ready
+            }
+        }
+        downloadJob?.let { job ->
+            if (job.isActive) {
+                job.join()
+                return readyApk?.takeIf { it.apk.versionCode == apk.versionCode }
+            }
+        }
+        val job = viewModelScope.launch {
+            try {
+                downloadError = null
+                val file = withContext(Dispatchers.IO) { repository.downloadApk(apk) }
+                readyApk = ReadyApk(apk, file, origin, SystemClock.elapsedRealtime())
+                _state.update { it.copy(readyVersionName = apk.versionName) }
+                Log.i(TAG, "update ${apk.versionName} downloaded and verified")
+            } catch (t: Throwable) {
+                downloadError = t.message ?: "не удалось скачать"
+                Log.e(TAG, "apk download failed", t)
+                // Повторим при следующей проверке или когда вернётся сеть.
+                lastCheckFailed = true
+            }
+        }
+        downloadJob = job
+        job.join()
+        return readyApk?.takeIf { it.apk.versionCode == apk.versionCode }
+    }
+
+    /** Раз в секунду из idleWatchdog: решаем, ставить ли обновление и показывать ли кнопку. */
+    private fun evaluateUpdate() {
+        val s = _state.value
+        val ready = readyApk
+        val now = SystemClock.elapsedRealtime()
+        val config = repository.updateConfig()
+        val calendar = Calendar.getInstance()
+        val decision = UpdatePolicy.decide(
+            UpdateInputs(
+                ready = ready != null,
+                origin = ready?.origin ?: CheckOrigin.BACKGROUND,
+                deviceOwner = kiosk.isDeviceOwner(),
+                silentFailed = ready != null && silentFailedFor == ready.apk.versionCode,
+                installing = installing,
+                playing = player.isPlaying,
+                visitorBusy = visitorBusy() || s.onboarding.helpOpen,
+                serviceMenuOpen = s.serviceMenuVisible || s.wifi.open,
+                untouchedSinceStart = untouchedSinceStart,
+                sinceInteractionMs = now - lastInteractionAt,
+                readyForMs = ready?.let { now - it.readyAtElapsed } ?: 0L,
+                minuteOfDay = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
+            ),
+            config
+        )
+        val sync = repository.state.value
+        val status = when {
+            installing -> "ставится"
+            ready != null && decision.waitingReason != null ->
+                "${ready.apk.versionName} скачана, ${decision.waitingReason}"
+            ready != null -> "${ready.apk.versionName} скачана"
+            sync.apkDownloading -> "скачивается ${((sync.apkProgress ?: 0f) * 100).toInt()} %"
+            downloadError != null -> "ошибка: $downloadError"
+            sync.cloudVersionCode != null && sync.cloudVersionCode <= BuildConfig.VERSION_CODE -> "стоит актуальная версия"
+            else -> "нет данных"
+        }
+        _state.update {
+            it.copy(
+                updateButton = if (it.updateButtonBusy) it.updateButton else decision.button,
+                updateStatus = status
+            )
+        }
+        if (decision.installSilentlyNow && ready != null) {
+            viewModelScope.launch { installSilently(ready) }
+        }
+    }
+
+    /**
+     * Тихая установка (приложение — владелец устройства): музыка плавно уходит в тишину,
+     * экран «Обновляем стенд» проявляется за ~400 мс, ставим флаг и коммитим сессию.
+     * После MY_PACKAGE_REPLACED новая версия поднимается с тем же экраном.
+     */
+    private suspend fun installSilently(ready: ReadyApk) {
+        if (installing) return
+        installing = true
+        installingSilently = true
+        _state.update {
+            it.copy(
+                serviceMenuVisible = false,
+                updateButton = UpdateButton.NONE,
+                updateScreen = UpdateScreenState(UpdateScreenPhase.PREPARING, ready.apk.versionName, 0f)
+            )
+        }
+        uploads.closeModal()
+        fadeOutMusic()
+        delay(SCREEN_FADE_IN_MS)
+        try {
+            val intact = withContext(Dispatchers.IO) { Sha256.matches(ready.file, ready.apk.sha256) }
+            if (!intact) {
+                readyApk = null
+                throw IllegalStateException("файл обновления повреждён, скачаю заново")
+            }
+            updateFlags.set(ready.apk.versionCode, ready.apk.versionName, System.currentTimeMillis())
+            repository.markInstalling()
+            withContext(Dispatchers.IO) {
+                installer.install(ready.file, silent = true) { p ->
+                    _state.update { st ->
+                        st.copy(updateScreen = st.updateScreen?.copy(progress = p))
+                    }
+                }
+            }
+            _state.update {
+                it.copy(updateScreen = it.updateScreen?.copy(phase = UpdateScreenPhase.INSTALLING, progress = 1f))
+            }
+            // Если система так и не перезапустила приложение, возвращаем рабочий экран.
+            installTimeout = viewModelScope.launch {
+                delay(UpdateFlagStore.TIMEOUT_MS)
+                onInstallFailed("Обновление не завершилось за ${UpdateFlagStore.TIMEOUT_MS / 1000} с")
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "silent install failed", t)
+            repository.reportInstallFailed(t.message ?: "Не удалось установить обновление")
+            onInstallFailed(t.message ?: "Не удалось установить обновление")
+        }
+    }
+
+    /** Установка с подтверждением системы: приложение не владелец устройства или тихая упала. */
+    private suspend fun installWithSystem(ready: ReadyApk) {
+        if (installing) return
+        if (!installer.canInstall()) {
+            pendingInstall = true
+            repository.markNeedInstallPermission(true)
+            reportUpdateProblem("Разрешите приложению установку обновлений, затем нажмите «Обновить» ещё раз")
+            return
+        }
+        installing = true
+        installingSilently = false
+        // Окно подтверждения принадлежит другому пакету: в режиме блокировки киоска система его не покажет.
+        _state.update { it.copy(updateButtonBusy = true, serviceMenuVisible = false, kioskLockTaskDesired = false) }
+        fadeOutMusic()
+        try {
+            repository.markInstalling()
+            withContext(Dispatchers.IO) { installer.install(ready.file, silent = false) }
+            installTimeout = viewModelScope.launch {
+                delay(UpdateFlagStore.TIMEOUT_MS)
+                onInstallFailed("Установку не подтвердили")
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "system install failed", t)
+            repository.reportInstallFailed(t.message ?: "Не удалось установить обновление")
+            onInstallFailed(t.message ?: "Не удалось установить обновление")
+        }
+    }
+
+    /** Кнопка всегда либо ставит, либо объясняет, почему нет: текст в служебном меню и в логе. */
+    private fun reportUpdateProblem(message: String) {
+        Log.w(TAG, "update: $message")
+        repository.reportError(message)
+        _state.update { it.copy(lastError = message, updateStatus = message) }
+    }
+
+    private fun onInstallFailed(message: String) {
+        if (!installing) return
+        installTimeout?.cancel()
+        installTimeout = null
+        val wasSilent = installingSilently
+        installing = false
+        installingSilently = false
+        updateFlags.clear()
+        repository.clearInstalling()
+        if (wasSilent) {
+            // Тихо не вышло — дальше только кнопка с подтверждением системы.
+            silentFailedFor = readyApk?.apk?.versionCode
+        }
+        Log.e(TAG, "install failed: $message")
+        _state.update { it.copy(updateScreen = null, updateButtonBusy = false, lastError = message) }
+    }
+
+    /** Экран обновления после перезапуска: «Готово · версия X» или ожидание с таймаутом. */
+    private fun resumeUpdateScreenAfterRestart() {
+        val flag = updateFlags.read()
+        val now = System.currentTimeMillis()
+        when (
+            UpdatePolicy.resumeAfterRestart(
+                flagTargetVersionCode = flag?.targetVersionCode,
+                flagStartedAtMs = flag?.startedAtMs,
+                currentVersionCode = BuildConfig.VERSION_CODE,
+                nowMs = now,
+                timeoutMs = UpdateFlagStore.TIMEOUT_MS
+            )
+        ) {
+            RestartOutcome.NONE -> Unit
+            RestartOutcome.SHOW_DONE -> {
+                updateFlags.clear()
+                _state.update {
+                    it.copy(updateScreen = UpdateScreenState(UpdateScreenPhase.DONE, BuildConfig.VERSION_NAME, 1f))
+                }
+                viewModelScope.launch {
+                    delay(DONE_HOLD_MS)
+                    _state.update { it.copy(updateScreen = null) }
+                }
+            }
+            RestartOutcome.KEEP_WAITING -> {
+                val f = flag ?: return
+                installing = true
+                installingSilently = true
+                _state.update {
+                    it.copy(updateScreen = UpdateScreenState(UpdateScreenPhase.INSTALLING, f.targetVersionName, 1f))
+                }
+                installTimeout = viewModelScope.launch {
+                    delay((f.startedAtMs + UpdateFlagStore.TIMEOUT_MS - now).coerceAtLeast(1_000L))
+                    onInstallFailed("Обновление ${f.targetVersionName} не встало")
+                }
+            }
+            RestartOutcome.EXPIRED -> {
+                updateFlags.clear()
+                repository.reportError("Прошлое обновление не встало")
+            }
+        }
+    }
+
+    /** Плавно уводим музыку в тишину перед экраном обновления. */
+    private suspend fun fadeOutMusic() {
+        if (!player.isPlaying) return
+        val start = _state.value.volume
+        val steps = 12
+        for (i in 1..steps) {
+            player.applyVolume(start * (1f - i / steps.toFloat()))
+            delay(MUSIC_FADE_MS / steps)
+        }
+        player.stop()
+        player.applyVolume(start)
+        publish()
+    }
+
+    private fun registerNetworkCallback() {
+        val cm = getApplication<Application>()
+            .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                viewModelScope.launch {
+                    // Сеть вернулась, а прошлая проверка упала: проверяем снова, не дожидаясь таймера.
+                    delay(NETWORK_SETTLE_MS)
+                    if (UpdatePolicy.shouldCheckOnNetworkRestore(lastCheckFailed, checking) && !installing) {
+                        runCheck(CheckOrigin.BACKGROUND)
+                    }
+                }
+            }
+        }
+        try {
+            cm.registerDefaultNetworkCallback(callback)
+            networkCallback = callback
+        } catch (t: Throwable) {
+            Log.e(TAG, "network callback failed", t)
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        val callback = networkCallback ?: return
+        val cm = getApplication<Application>()
+            .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        try {
+            cm.unregisterNetworkCallback(callback)
+        } catch (_: Throwable) {
+        }
+        networkCallback = null
+    }
+
     private fun applySync(sync: SyncState) {
+        uploads.resetAfterMs = repository.ownTrackConfig().resetAfterMs
         _state.update {
             it.copy(
                 updateAvailable = sync.updateAvailable,
@@ -408,8 +872,16 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
                 checkingUpdates = sync.checking,
                 apkProgress = sync.apkProgress,
                 apkBusy = sync.apkDownloading || sync.apkInstalling,
-                lastError = sync.lastError
+                lastError = sync.lastError,
+                lastCheckAtMs = sync.lastCheckAtMs,
+                lastCheckOk = sync.lastCheckOk,
+                cloudVersionName = sync.cloudVersionName,
+                cloudVersionCode = sync.cloudVersionCode
             )
+        }
+        if (sync.installFailures != seenInstallFailures) {
+            seenInstallFailures = sync.installFailures
+            if (installing) onInstallFailed(sync.lastError ?: "Не удалось установить обновление")
         }
         refreshIdleContent()
         maybeBindCachedTrack()
@@ -434,6 +906,44 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         cacheBoundFor = null
         uploads.selectCustom()
         publish()
+    }
+
+    /** После экрана загрузки музыка входит мягко, без щелчка. */
+    private fun playCustomFadingIn(track: UploadedTrack) {
+        val target = _state.value.volume
+        val ok = player.prepareFromFile(track.file, _state.value.pan, 0f, autoplay = true)
+        if (!ok) return
+        cacheBoundFor = null
+        uploads.selectCustom()
+        publish()
+        viewModelScope.launch {
+            val steps = 10
+            for (i in 1..steps) {
+                delay(CUSTOM_FADE_IN_MS / steps)
+                if (_state.value.volume != target) break
+                player.applyVolume(target * i / steps.toFloat())
+            }
+            player.applyVolume(_state.value.volume)
+        }
+    }
+
+    /**
+     * Сброс своего трека по неактивности: если трек играет, плавно гасим его,
+     * потом удаляем файл и возвращаем кнопку «Свой трек» в исходное состояние.
+     */
+    private suspend fun resetOwnTrack() {
+        try {
+            if (_upload.value.customSelected && player.isPlaying) fadeOutMusic()
+            // Пока гасили звук, кто-то мог коснуться экрана: тогда трек оставляем.
+            if (!uploads.shouldExpireSession()) return
+            val wasCustom = _upload.value.customSelected
+            uploads.closeModal()
+            uploads.clearUploaded(notify = false)
+            if (wasCustom) prepareBuiltIn(StandTrack.Club, autoplay = false)
+            Log.i(TAG, "own track reset after inactivity")
+        } finally {
+            resettingOwnTrack = false
+        }
     }
 
     private fun onCustomSessionExpired() {
@@ -463,6 +973,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         ticker?.cancel()
+        unregisterNetworkCallback()
         uploads.stop()
         player.release()
         super.onCleared()
@@ -470,5 +981,11 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         private const val TAG = "AerocellKiosk"
+        private const val CUSTOM_FADE_IN_MS = 450L
+        private const val SCHEDULER_TICK_MS = 30_000L
+        private const val SCREEN_FADE_IN_MS = 450L
+        private const val MUSIC_FADE_MS = 600L
+        private const val DONE_HOLD_MS = 1_800L
+        private const val NETWORK_SETTLE_MS = 3_000L
     }
 }

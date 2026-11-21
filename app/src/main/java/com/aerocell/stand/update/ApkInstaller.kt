@@ -22,7 +22,7 @@ class ApkInstaller(private val context: Context) {
         ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 
-    fun install(file: File, silent: Boolean = false) {
+    fun install(file: File, silent: Boolean = false, onProgress: (Float) -> Unit = {}) {
         if (!file.isFile) throw IllegalArgumentException("APK не найден")
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
@@ -33,7 +33,23 @@ class ApkInstaller(private val context: Context) {
         val sessionId = installer.createSession(params)
         installer.openSession(sessionId).use { session ->
             session.openWrite("package", 0, file.length()).use { out ->
-                file.inputStream().use { input -> input.copyTo(out) }
+                val total = file.length().coerceAtLeast(1L)
+                var written = 0L
+                var lastReported = -1
+                file.inputStream().use { input ->
+                    val buf = ByteArray(256 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n <= 0) break
+                        out.write(buf, 0, n)
+                        written += n
+                        val percent = (written * 100 / total).toInt()
+                        if (percent != lastReported) {
+                            lastReported = percent
+                            onProgress(percent / 100f)
+                        }
+                    }
+                }
                 session.fsync(out)
             }
             val intent = Intent(context, InstallResultReceiver::class.java).apply {

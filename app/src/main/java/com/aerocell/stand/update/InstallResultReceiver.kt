@@ -32,7 +32,7 @@ class InstallResultReceiver : BroadcastReceiver() {
                 Log.e(TAG, "install failed status=$status message=$message")
                 val text = message ?: "Не удалось установить обновление"
                 val app = context.applicationContext as? StandAppHolder
-                app?.contentRepository?.reportError(text)
+                app?.contentRepository?.reportInstallFailed(text)
             }
         }
     }
