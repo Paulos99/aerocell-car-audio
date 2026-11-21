@@ -7,14 +7,16 @@ object KioskPolicy {
         apkBusy: Boolean,
         serviceMenuVisible: Boolean,
         playing: Boolean,
-        idleActive: Boolean
+        idleActive: Boolean,
+        visitorBusy: Boolean = false
     ): Boolean {
         return isDeviceOwner &&
             updateAvailable &&
             !apkBusy &&
             !serviceMenuVisible &&
             !playing &&
-            idleActive
+            idleActive &&
+            !visitorBusy
     }
 
     fun pinMatches(input: String, expected: String): Boolean {

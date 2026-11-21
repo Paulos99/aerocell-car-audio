@@ -85,4 +85,19 @@ class KioskPolicyTest {
         assertEquals(KioskPolicy.DEFAULT_PIN, KioskPolicy.resolvePin("   "))
         assertEquals("1470", KioskPolicy.resolvePin(" 1470 "))
     }
+
+    @Test
+    fun autoInstallSkippedWhenVisitorUploadBusy() {
+        assertFalse(
+            KioskPolicy.shouldAutoInstall(
+                isDeviceOwner = true,
+                updateAvailable = true,
+                apkBusy = false,
+                serviceMenuVisible = false,
+                playing = false,
+                idleActive = true,
+                visitorBusy = true
+            )
+        )
+    }
 }

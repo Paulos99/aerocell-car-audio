@@ -14,6 +14,9 @@ import com.aerocell.stand.update.ApkInstaller
 import com.aerocell.stand.update.ContentRepository
 import com.aerocell.stand.update.IdleConfig
 import com.aerocell.stand.update.SyncState
+import com.aerocell.stand.upload.UploadManager
+import com.aerocell.stand.upload.UploadUiState
+import com.aerocell.stand.upload.UploadedTrack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -66,6 +69,13 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         )
     )
     val state: StateFlow<StandUiState> = _state
+    private val _upload = MutableStateFlow(UploadUiState())
+    val upload: StateFlow<UploadUiState> = _upload
+    private val uploads = UploadManager(
+        context = application,
+        onTrackReady = { playCustom(it, autoplay = true) },
+        onSessionExpired = { onCustomSessionExpired() }
+    )
     private var ticker: Job? = null
     private var pendingInstall = false
     private var cacheBoundFor: StandTrack? = null
@@ -73,9 +83,12 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
     private var autoInstallAttemptedFor: Int? = null
 
     init {
+        uploads.onStateChanged = { _upload.value = it }
+        _upload.value = uploads.ui
         val s = _state.value
-        player.prepare(StandTrack.Club, pan = s.pan, volume = s.volume, autoplay = false, file = repository.cachedTrackFile(StandTrack.Club.genre))
-        if (repository.cachedTrackFile(StandTrack.Club.genre) != null) {
+        val clubFile = repository.cachedTrackFile(StandTrack.Club.genre)
+        player.prepare(StandTrack.Club, pan = s.pan, volume = s.volume, autoplay = false, file = clubFile)
+        if (clubFile != null) {
             cacheBoundFor = StandTrack.Club
         }
         refreshIdleContent()
@@ -83,6 +96,8 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { idleWatchdog() }
         ticker = viewModelScope.launch {
             while (isActive) {
+                uploads.expireSessionIfNeeded()
+                uploads.markPlaying(_state.value.playing && _upload.value.customSelected)
                 publish()
                 delay(80)
             }
@@ -96,6 +111,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectTrack(track: StandTrack) {
+        uploads.markBuiltInSelected()
         val s = _state.value
         val file = repository.cachedTrackFile(track.genre)
         player.prepare(track, s.pan, s.volume, autoplay = true, file = file)
@@ -104,37 +120,78 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         publish()
     }
 
+    fun selectCustomTrack() {
+        val custom = uploads.selectCustom() ?: return
+        playCustom(custom, autoplay = true)
+    }
+
+    fun openUpload() {
+        uploads.openModal()
+        onUserInteraction()
+    }
+
+    fun closeUpload() {
+        uploads.closeModal()
+        onUserInteraction()
+    }
+
+    /** Удаляет трек посетителя, когда стенд уходит в простой. */
+    fun endVisitorSession() {
+        uploads.closeModal()
+        val wasCustom = _upload.value.customSelected
+        uploads.clearUploaded(notify = false)
+        if (wasCustom) {
+            prepareBuiltIn(StandTrack.Club, autoplay = false)
+        }
+    }
+
     fun previousTrack() {
-        selectTrack(StandTrack.previousOf(_state.value.track))
+        if (_upload.value.customSelected) {
+            selectTrack(StandTrack.entries.last())
+            return
+        }
+        val current = _state.value.track
+        val previous = StandTrack.previousOf(current)
+        if (previous == StandTrack.entries.last() && _upload.value.customTrack != null) {
+            selectCustomTrack()
+        } else {
+            selectTrack(previous)
+        }
     }
 
     fun play() {
+        uploads.touch()
         player.play()
         publish()
     }
 
     fun pause() {
+        uploads.touch()
         player.pause()
         publish()
     }
 
     fun stop() {
+        uploads.touch()
         player.stop()
         publish()
     }
 
     fun seek(positionMs: Int) {
+        uploads.touch()
         player.seek(positionMs)
         publish()
     }
 
     fun setPan(pan: Float) {
+        uploads.touch()
         val next = pan.coerceIn(-1f, 1f)
         player.applyPan(next)
         _state.update { it.copy(pan = next) }
     }
 
     fun setVolume(volume: Float) {
+        uploads.touch()
         val next = volume.coerceIn(0f, 1f)
         player.applyVolume(next)
         _state.update { it.copy(volume = next) }
@@ -161,6 +218,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun enterIdle() {
         if (_state.value.idleActive) return
+        endVisitorSession()
         // На экране простоя музыка стенда не играет.
         if (player.isPlaying) player.stop()
         refreshIdleContent()
@@ -174,13 +232,19 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         publish()
     }
 
+    private fun visitorBusy(): Boolean {
+        val upload = _upload.value
+        return upload.modalOpen || upload.uploading
+    }
+
     private suspend fun idleWatchdog() {
         while (true) {
             delay(1_000)
             val s = _state.value
             val now = SystemClock.elapsedRealtime()
-            // Пока играет музыка, открыто меню или идёт обновление, стенд не «простаивает».
-            if (player.isPlaying || s.serviceMenuVisible || s.apkBusy) {
+            // Пока играет музыка, открыто меню или окно своего трека,
+            // идёт загрузка файла или обновление, стенд не «простаивает».
+            if (player.isPlaying || s.serviceMenuVisible || s.apkBusy || visitorBusy()) {
                 lastInteractionAt = now
                 continue
             }
@@ -200,7 +264,8 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
                 apkBusy = s.apkBusy,
                 serviceMenuVisible = s.serviceMenuVisible,
                 playing = player.isPlaying,
-                idleActive = s.idleActive
+                idleActive = s.idleActive,
+                visitorBusy = visitorBusy()
             )
         ) return
         val versionCode = sync.updateVersionCode ?: return
@@ -285,6 +350,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
                 kioskLockTaskDesired = if (owner) it.kioskLockTaskDesired else false
             )
         }
+        uploads.refreshNetwork()
     }
 
     fun installPermissionIntent(): Intent? {
@@ -309,6 +375,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
             if (allowSilent && (
                     player.isPlaying ||
                         s.serviceMenuVisible ||
+                        visitorBusy() ||
                         !s.idleActive
                     )
             ) {
@@ -349,6 +416,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun maybeBindCachedTrack() {
+        if (_upload.value.customSelected) return
         val current = _state.value.track
         if (_state.value.playing) return
         val file = repository.cachedTrackFile(current.genre) ?: return
@@ -356,6 +424,28 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         val s = _state.value
         player.prepare(current, s.pan, s.volume, autoplay = false, file = file)
         cacheBoundFor = current
+        publish()
+    }
+
+    private fun playCustom(track: UploadedTrack, autoplay: Boolean) {
+        val s = _state.value
+        val ok = player.prepareFromFile(track.file, s.pan, s.volume, autoplay)
+        if (!ok) return
+        cacheBoundFor = null
+        uploads.selectCustom()
+        publish()
+    }
+
+    private fun onCustomSessionExpired() {
+        prepareBuiltIn(StandTrack.Club, autoplay = false)
+    }
+
+    private fun prepareBuiltIn(track: StandTrack, autoplay: Boolean) {
+        val s = _state.value
+        val file = repository.cachedTrackFile(track.genre)
+        player.prepare(track, s.pan, s.volume, autoplay = autoplay, file = file)
+        cacheBoundFor = if (file != null) track else null
+        _state.update { it.copy(track = track) }
         publish()
     }
 
@@ -373,6 +463,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         ticker?.cancel()
+        uploads.stop()
         player.release()
         super.onCleared()
     }

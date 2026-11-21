@@ -64,6 +64,36 @@ class StandPlayer(private val context: Context) {
         if (autoplay) next.start()
     }
 
+    /** Plays a visitor-uploaded file. Returns false if the file cannot be decoded. */
+    fun prepareFromFile(file: File, pan: Float, volume: Float, autoplay: Boolean): Boolean {
+        if (!file.isFile || file.length() <= 0L) return false
+        releaseVisualizerOnly()
+        player?.reset()
+        player?.release()
+        player = null
+        waveform = ByteArray(0)
+        midEnergy = 0f
+        this.pan = pan.coerceIn(-1f, 1f)
+        this.volume = volume.coerceIn(0f, 1f)
+        val next = try {
+            MediaPlayer().apply {
+                setDataSource(file.absolutePath)
+                prepare()
+            }
+        } catch (_: Throwable) {
+            return false
+        }
+        player = next
+        applyLevels()
+        next.setOnCompletionListener {
+            it.seekTo(0)
+            it.pause()
+        }
+        attachVisualizer(next.audioSessionId)
+        if (autoplay) next.start()
+        return true
+    }
+
     fun play() {
         val p = player ?: return
         if (!p.isPlaying) p.start()

@@ -78,6 +78,7 @@ import com.aerocell.stand.R
 import com.aerocell.stand.BuildConfig
 import com.aerocell.stand.StandUiState
 import com.aerocell.stand.audio.StandTrack
+import com.aerocell.stand.upload.UploadUiState
 import com.aerocell.stand.ui.theme.AeroBg
 import com.aerocell.stand.ui.theme.AeroMuted
 import com.aerocell.stand.ui.theme.AeroPanel
@@ -101,6 +102,10 @@ fun StandScreen(
     onStop: () -> Unit,
     onPan: (Float) -> Unit,
     onVolume: (Float) -> Unit,
+    uploadState: UploadUiState = UploadUiState(),
+    onOpenUpload: () -> Unit = {},
+    onCloseUpload: () -> Unit = {},
+    onSelectCustomTrack: () -> Unit = {},
     onLogoLongPress: () -> Unit = {},
     onDismissServiceMenu: () -> Unit = {},
     onShowIdle: () -> Unit = {},
@@ -160,7 +165,10 @@ fun StandScreen(
                 onPlay = onPlay,
                 onPause = onPause,
                 onStop = onStop,
-                onVolume = onVolume
+                onVolume = onVolume,
+                uploadState = uploadState,
+                onOpenUpload = onOpenUpload,
+                onSelectCustomTrack = onSelectCustomTrack
             )
         }
         // Logo on top of all layers; size ~2.5× previous (~78.dp → ~195.dp)
@@ -189,6 +197,7 @@ fun StandScreen(
                 .padding(top = 8.dp, end = 16.dp)
                 .zIndex(11f)
         )
+        OwnTrackModal(state = uploadState, onClose = onCloseUpload)
         if (state.serviceMenuVisible) {
             ServiceMenuDialog(
                 state = state,
@@ -675,7 +684,10 @@ private fun BottomBar(
     onPlay: () -> Unit,
     onPause: () -> Unit,
     onStop: () -> Unit,
-    onVolume: (Float) -> Unit
+    onVolume: (Float) -> Unit,
+    uploadState: UploadUiState = UploadUiState(),
+    onOpenUpload: () -> Unit = {},
+    onSelectCustomTrack: () -> Unit = {}
 ) {
     Row(
         modifier = Modifier
@@ -697,10 +709,22 @@ private fun BottomBar(
                 StandTrack.entries.forEach { track ->
                     GenrePill(
                         label = track.label,
-                        active = track == state.track,
+                        active = track == state.track && !uploadState.customSelected,
                         onClick = { onSelectTrack(track) }
                     )
                 }
+                if (uploadState.customTrack != null) {
+                    GenrePill(
+                        label = "СВОЙ ТРЕК",
+                        active = uploadState.customSelected,
+                        onClick = onSelectCustomTrack
+                    )
+                }
+                GenrePill(
+                    label = "Свой трек",
+                    active = false,
+                    onClick = onOpenUpload
+                )
             }
         }
         Row(

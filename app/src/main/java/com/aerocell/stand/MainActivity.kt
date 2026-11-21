@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
             AerocellTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = AeroBg) {
                     val state by viewModel.state.collectAsState()
+                    val upload by viewModel.upload.collectAsState()
                     StandScreen(
                         state = state,
                         onSelectTrack = viewModel::selectTrack,
@@ -76,6 +77,10 @@ class MainActivity : ComponentActivity() {
                         onStop = viewModel::stop,
                         onPan = viewModel::setPan,
                         onVolume = viewModel::setVolume,
+                        uploadState = upload,
+                        onOpenUpload = viewModel::openUpload,
+                        onCloseUpload = viewModel::closeUpload,
+                        onSelectCustomTrack = viewModel::selectCustomTrack,
                         onLogoLongPress = viewModel::onLogoLongPress,
                         onDismissServiceMenu = viewModel::dismissServiceMenu,
                         onShowIdle = viewModel::showIdleNow,
