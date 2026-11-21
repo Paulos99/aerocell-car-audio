@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
                         uploadState = upload,
                         onOpenUpload = viewModel::openUpload,
                         onCloseUpload = viewModel::closeUpload,
+                        onCancelUpload = viewModel::cancelUpload,
                         onSelectCustomTrack = viewModel::selectCustomTrack,
                         onLogoLongPress = viewModel::onLogoLongPress,
                         onDismissServiceMenu = viewModel::dismissServiceMenu,

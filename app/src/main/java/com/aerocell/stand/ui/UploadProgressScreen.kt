@@ -77,7 +77,7 @@ internal fun activeStep(stage: UploadStage): Int = when (stage) {
 
 /** Полноэкранный экран «Свой трек»: логотип, имя трека, четыре шага и полоса. */
 @Composable
-fun UploadProgressOverlay(state: UploadUiState, modifier: Modifier = Modifier) {
+fun UploadProgressOverlay(state: UploadUiState, onCancel: () -> Unit = {}, modifier: Modifier = Modifier) {
     AnimatedVisibility(
         visible = state.stage != UploadStage.NONE,
         enter = fadeIn(tween(300)),
@@ -86,14 +86,14 @@ fun UploadProgressOverlay(state: UploadUiState, modifier: Modifier = Modifier) {
     ) {
         val last = remember { Holder2<UploadUiState>() }
         if (state.stage != UploadStage.NONE) last.value = state
-        last.value?.let { UploadProgressScreen(it) }
+        last.value?.let { UploadProgressScreen(it, onCancel) }
     }
 }
 
 private class Holder2<T>(var value: T? = null)
 
 @Composable
-private fun UploadProgressScreen(state: UploadUiState) {
+private fun UploadProgressScreen(state: UploadUiState, onCancel: () -> Unit) {
     val failed = state.stage == UploadStage.FAILED
     val done = state.stage == UploadStage.DONE
     val active = activeStep(state.stage)
@@ -147,6 +147,38 @@ private fun UploadProgressScreen(state: UploadUiState) {
             letterSpacing = 2.8.sp,
             modifier = Modifier.padding(start = 32.dp, top = 28.dp)
         )
+        // Закрыть можно всегда: возвращает на главный экран, загрузка отменяется.
+        if (!state.stage.let { it == UploadStage.DONE }) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 12.dp, end = 12.dp)
+                    .size(72.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onCancel
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .background(Color.White.copy(alpha = 0.10f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "✕", color = Color.White.copy(alpha = 0.9f), fontSize = 22.sp)
+                }
+            }
+            Text(
+                text = "Закрыть",
+                color = Color.White.copy(alpha = 0.45f),
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 80.dp, end = 26.dp)
+            )
+        }
         Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,

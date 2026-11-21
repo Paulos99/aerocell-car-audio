@@ -124,6 +124,7 @@ fun StandScreen(
     uploadState: UploadUiState = UploadUiState(),
     onOpenUpload: () -> Unit = {},
     onCloseUpload: () -> Unit = {},
+    onCancelUpload: () -> Unit = {},
     onSelectCustomTrack: () -> Unit = {},
     onLogoLongPress: () -> Unit = {},
     onDismissServiceMenu: () -> Unit = {},
@@ -270,7 +271,7 @@ fun StandScreen(
                 .zIndex(12f)
         )
         OwnTrackModal(state = uploadState, onClose = onCloseUpload)
-        UploadProgressOverlay(state = uploadState, modifier = Modifier.zIndex(26f))
+        UploadProgressOverlay(state = uploadState, onCancel = onCancelUpload, modifier = Modifier.zIndex(26f))
         if (state.serviceMenuVisible) {
             ServiceMenuDialog(
                 state = state,

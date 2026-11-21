@@ -17,6 +17,9 @@ interface VisitorUploadTransport {
     /** Start or stop status polling. Default is a no-op (local HTTP does not poll). */
     fun onModalChanged(open: Boolean) {}
 
+    /** Забыть текущую сессию: следующий currentLink создаст новую (новый QR). */
+    fun resetSession() {}
+
     /** true, если транспорт отдельно сообщает, что телефон уже грузит файл (облако). */
     val reportsPhoneUpload: Boolean get() = false
 

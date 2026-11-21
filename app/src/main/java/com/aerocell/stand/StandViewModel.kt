@@ -228,6 +228,12 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         onUserInteraction()
     }
 
+    /** «Закрыть» на экране загрузки своего трека. */
+    fun cancelUpload() {
+        uploads.cancelUpload()
+        onUserInteraction()
+    }
+
     /** Удаляет трек посетителя, когда стенд уходит в простой. */
     fun endVisitorSession() {
         uploads.closeModal()

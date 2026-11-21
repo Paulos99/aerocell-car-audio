@@ -57,24 +57,40 @@ class UploadManager(
         currentToken = { token }
     )
 
+    private val gate = UploadGate()
+
+    /** После «Закрыть» на экране загрузки поздние ответы старой сессии игнорируем до нового QR. */
+    @Volatile
+    private var cancelled = false
+
+    private fun now() = SystemClock.elapsedRealtime()
+
     private val listener = object : VisitorUploadTransport.Listener {
         override fun onUploadStarted() {
+            if (cancelled) return
             if (track != null) {
-                lastActivityAt = SystemClock.elapsedRealtime()
+                lastActivityAt = now()
             }
             main.removeCallbacks(clearStage)
             if (this@UploadManager.transport.reportsPhoneUpload) {
                 // Облако: файл уже там, планшет начинает его скачивать.
+                gate.onDownloadStarted(now())
                 publish(uploading = true, stage = UploadStage.PREPARING, stageProgress = 0f)
             } else {
+                gate.onDownloadStarted(now())
                 publish(uploading = true, stage = UploadStage.UPLOADING, stageProgress = null)
             }
+            startWatchdog()
         }
 
         override fun onPhoneUploading(filename: String?, percent: Int?) {
+            if (cancelled) return
             if (ui.stage == UploadStage.PREPARING || ui.stage == UploadStage.DONE) return
+            // QR не убираем, пока телефон по-настоящему не начал грузить (процент пошёл).
+            val decision = gate.onWaiting(percent, now())
+            if (decision !is UploadGate.Decision.Show) return
             main.removeCallbacks(clearStage)
-            val next = percent?.coerceIn(0, 100)?.div(100f)
+            val next = decision.fraction
             val prev = if (ui.stage == UploadStage.UPLOADING) ui.stageProgress else null
             // Прогресс не идёт назад.
             val progress = when {
@@ -88,27 +104,91 @@ class UploadManager(
                 stageTrackName = filename ?: ui.stageTrackName,
                 stageProgress = progress
             )
+            startWatchdog()
         }
 
         override fun onDownloadProgress(fraction: Float) {
+            if (cancelled) return
             val next = fraction.coerceIn(0f, 1f)
             val prev = if (ui.stage == UploadStage.PREPARING) ui.stageProgress ?: 0f else 0f
+            if (next > prev) gate.onActivity(now())
             publish(uploading = true, stage = UploadStage.PREPARING, stageProgress = maxOf(prev, next))
         }
 
         override fun onUploadFailed() {
-            publish(uploading = false, stage = UploadStage.FAILED, stageProgress = null)
-            main.removeCallbacks(clearStage)
-            main.postDelayed(clearStage, FAILED_HOLD_MS)
+            if (cancelled) return
+            failToQr()
         }
 
         override fun onAccepted(tempFile: File, filename: String, extension: String) {
+            if (cancelled) {
+                runCatching { tempFile.delete() }
+                return
+            }
+            stopWatchdog()
             handleAccepted(tempFile, filename, extension)
         }
 
         override fun onUploadFinished() {
-            if (ui.uploading) publish(uploading = false)
+            if (ui.uploading && ui.stage != UploadStage.UPLOADING) publish(uploading = false)
         }
+    }
+
+    /** Раз в 5 с проверяем, не зависла ли загрузка. */
+    private val watchdog = object : Runnable {
+        override fun run() {
+            val stage = ui.stage
+            if (stage != UploadStage.UPLOADING && stage != UploadStage.PREPARING) return
+            if (gate.isStalled(now())) {
+                failToQr()
+                return
+            }
+            main.postDelayed(this, WATCHDOG_MS)
+        }
+    }
+
+    private fun startWatchdog() {
+        main.removeCallbacks(watchdog)
+        main.postDelayed(watchdog, WATCHDOG_MS)
+    }
+
+    private fun stopWatchdog() {
+        main.removeCallbacks(watchdog)
+    }
+
+    /**
+     * Ошибка или зависание: коротко показываем «не получилось», потом снова QR с новой сессией.
+     * Старая сессия в облаке сбрасывается, чтобы её хвосты не открыли экран загрузки заново.
+     */
+    private fun failToQr() {
+        stopWatchdog()
+        gate.reset()
+        runCatching { transport.resetSession() }
+        token = UploadTokens.generate()
+        publish(uploading = false, stage = UploadStage.FAILED, stageProgress = null, pageUrl = null)
+        main.removeCallbacks(clearStage)
+        main.postDelayed(clearStage, FAILED_HOLD_MS)
+        refreshNetwork()
+    }
+
+    /** Кнопка «Закрыть» на экране загрузки: всегда возвращает на главный экран. */
+    fun cancelUpload() {
+        cancelled = true
+        stopWatchdog()
+        main.removeCallbacks(clearStage)
+        gate.reset()
+        transport.onModalChanged(false)
+        runCatching { transport.resetSession() }
+        token = UploadTokens.generate()
+        publish(
+            modalOpen = false,
+            uploading = false,
+            pageUrl = null,
+            stage = UploadStage.NONE,
+            stageTrackName = null,
+            stageProgress = null
+        )
+        refreshNetwork()
     }
 
     private val clearStage = Runnable {
@@ -142,6 +222,8 @@ class UploadManager(
     }
 
     fun openModal() {
+        cancelled = false
+        gate.reset()
         val started = runCatching { ensureTransport() }.isSuccess
         touch()
         transport.onModalChanged(true)
@@ -189,6 +271,8 @@ class UploadManager(
 
     fun clearUploaded(notify: Boolean = false) {
         val had = track != null
+        stopWatchdog()
+        gate.reset()
         store.clear()
         track = null
         token = UploadTokens.generate()
@@ -294,5 +378,6 @@ class UploadManager(
     companion object {
         const val DONE_HOLD_MS = 1_300L
         const val FAILED_HOLD_MS = 3_500L
+        const val WATCHDOG_MS = 5_000L
     }
 }

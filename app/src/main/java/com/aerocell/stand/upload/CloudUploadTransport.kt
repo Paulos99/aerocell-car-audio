@@ -85,6 +85,18 @@ class CloudUploadTransport(
 
     override val reportsPhoneUpload: Boolean get() = true
 
+    override fun resetSession() {
+        if (downloading.get()) return
+        val current = session ?: return
+        session = null
+        failed = false
+        if (autoSchedule) {
+            scheduler.execute { runCatching { api.deleteSession(current.sessionId) } }
+        } else {
+            runCatching { api.deleteSession(current.sessionId) }
+        }
+    }
+
     override fun onModalChanged(open: Boolean) {
         modalOpen.set(open)
         if (open) startPolling() else stopPolling()
