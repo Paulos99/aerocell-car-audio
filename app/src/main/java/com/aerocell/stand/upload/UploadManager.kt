@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import java.io.File
+import java.util.concurrent.Executors
 
 data class UploadedTrack(
     val file: File,
@@ -31,12 +32,15 @@ class UploadManager(
     transport: VisitorUploadTransport? = null
 ) {
     private val main = Handler(Looper.getMainLooper())
+    private val io = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "aerocell-upload-io").apply { isDaemon = true }
+    }
     private val store = UploadStore(File(context.filesDir, "uploads"))
     private val tempDir = File(context.cacheDir, "upload-tmp")
     private var token: String = UploadTokens.generate()
     private var lastActivityAt = 0L
     private var track: UploadedTrack? = null
-    private val transport: VisitorUploadTransport = transport ?: LocalHttpUploadTransport(
+    private val transport: VisitorUploadTransport = transport ?: UploadTransports.create(
         tempDir = tempDir,
         currentToken = { token }
     )
@@ -85,21 +89,27 @@ class UploadManager(
     fun openModal() {
         val started = runCatching { ensureTransport() }.isSuccess
         touch()
-        val link = transport.currentLink(token)
+        transport.onModalChanged(true)
         publish(
             modalOpen = true,
-            pageUrl = link.pageUrl,
-            serverFailed = !started || link.failed
+            pageUrl = if (started) ui.pageUrl else null,
+            justUploaded = false,
+            serverFailed = !started
         )
+        if (started) refreshNetwork()
     }
 
     fun closeModal() {
+        transport.onModalChanged(false)
         publish(modalOpen = false, justUploaded = false)
     }
 
     fun refreshNetwork() {
-        val link = transport.currentLink(token)
-        publish(pageUrl = link.pageUrl, serverFailed = link.failed)
+        io.execute {
+            val link = runCatching { transport.currentLink(token) }
+                .getOrElse { UploadLink(pageUrl = null, available = false, failed = true) }
+            publish(pageUrl = link.pageUrl, serverFailed = link.failed)
+        }
     }
 
     fun touch() {
@@ -132,15 +142,15 @@ class UploadManager(
         track = null
         token = UploadTokens.generate()
         lastActivityAt = 0L
-        val link = transport.currentLink(token)
         publish(
             customTrack = null,
             customSelected = false,
             justUploaded = false,
             uploading = false,
-            pageUrl = link.pageUrl,
-            serverFailed = link.failed
+            pageUrl = null,
+            serverFailed = false
         )
+        refreshNetwork()
         if (had && notify) {
             main.post { onSessionExpired() }
         }
@@ -171,7 +181,8 @@ class UploadManager(
         val uploaded = UploadedTrack(saved, filename)
         track = uploaded
         lastActivityAt = SystemClock.elapsedRealtime()
-        val link = transport.currentLink(token)
+        val link = runCatching { transport.currentLink(token) }
+            .getOrElse { UploadLink(pageUrl = null, available = false, failed = true) }
         publish(
             customTrack = uploaded,
             customSelected = true,

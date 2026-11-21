@@ -1,0 +1,14 @@
+{
+  "lifecycleRules": [
+    {
+      "id": "expire-uploads-1-day",
+      "enabled": true,
+      "filter": {
+        "prefix": "uploads/"
+      },
+      "expiration": {
+        "days": "1"
+      }
+    }
+  ]
+}

@@ -10,6 +10,15 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
 
+def uploadCloudFile = rootProject.file("upload-cloud.properties")
+def uploadCloudProps = new Properties()
+if (uploadCloudFile.exists()) {
+    uploadCloudFile.withInputStream { uploadCloudProps.load(it) }
+}
+def uploadFunctionUrl = (uploadCloudProps["UPLOAD_FUNCTION_URL"] ?: "").toString().replace("\\", "\\\\").replace("\"", "\\\"")
+def uploadStandSecret = (uploadCloudProps["UPLOAD_STAND_SECRET"] ?: "").toString().replace("\\", "\\\\").replace("\"", "\\\"")
+def uploadUseCloud = (uploadCloudProps["UPLOAD_USE_CLOUD"] ?: "false").toString().toBoolean().toString()
+
 android {
     namespace 'com.aerocell.stand'
     compileSdk 34
@@ -18,14 +27,17 @@ android {
         applicationId "com.aerocell.stand"
         minSdk 26
         targetSdk 34
-        versionCode 6
-        versionName "1.4.0"
+        versionCode 7
+        versionName "1.5.0"
 
         vectorDrawables {
             useSupportLibrary = true
         }
 
         buildConfigField "String", "CONTENT_MANIFEST_URL", "\"https://storage.yandexcloud.net/aerocell-stand/manifest.json\""
+        buildConfigField "String", "UPLOAD_FUNCTION_URL", "\"${uploadFunctionUrl}\""
+        buildConfigField "String", "UPLOAD_STAND_SECRET", "\"${uploadStandSecret}\""
+        buildConfigField "boolean", "UPLOAD_USE_CLOUD", uploadUseCloud
     }
 
     signingConfigs {

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>AEROCELL — свой трек</title>
+<style>
+  :root { --red:#FF1A1A; --glow:#FF3B3B; --bg:#070707; --card:#141414; --muted:rgba(255,255,255,.72); }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background:var(--bg); color:#fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  body { min-height: 100dvh; display:flex; align-items:center; justify-content:center; padding: 28px 20px; }
+  .wrap { width:100%; max-width: 420px; }
+  h1 { margin:0 0 8px; font-size: 28px; letter-spacing: 6px; color: var(--glow); font-weight: 800; text-align:center; }
+  h2 { margin:0 0 16px; font-size: 22px; font-weight: 650; text-align:center; }
+  p { margin:0 0 22px; color: var(--muted); line-height: 1.45; font-size: 16px; text-align:center; }
+  .card { background: var(--card); border-radius: 20px; padding: 28px 22px 32px; box-shadow: 0 0 80px rgba(255,26,26,.12); }
+  button, .file-btn {
+    appearance:none; border:0; display:block; width:100%; text-align:center;
+    border-radius: 14px; padding: 16px 18px;
+    background: var(--red); color:#fff; font-size: 17px; font-weight: 650; letter-spacing: .3px;
+    cursor:pointer;
+  }
+  button:disabled, .file-btn[aria-disabled="true"] { opacity:.55; cursor:default; }
+  input[type=file] { display:none; }
+  .progress-wrap { display:none; margin-top: 18px; }
+  .bar { height: 6px; background:#2a2a2a; border-radius: 99px; overflow:hidden; }
+  .bar > i { display:block; height:100%; width:0; background: var(--glow); }
+  .status { margin-top: 12px; text-align:center; font-size: 15px; color: var(--muted); min-height: 1.2em; }
+  .status.ok { color:#fff; }
+  .status.err { color:#ffb4b4; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>AEROCELL</h1>
+      <h2>Загрузите свой трек</h2>
+      <p>Выберите аудио с телефона — оно сразу заиграет на стенде. Подойдут mp3, m4a, aac, wav, flac и ogg, до 50 МБ. К Wi-Fi стенда подключаться не нужно.</p>
+      <label class="file-btn" id="pickLabel" for="file">Выбрать файл</label>
+      <input id="file" type="file" accept=".mp3,.m4a,.aac,.wav,.flac,.ogg,audio/*">
+      <div class="progress-wrap" id="progressWrap">
+        <div class="bar"><i id="bar"></i></div>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+  </div>
+<script>
+(function () {
+  var fileInput = document.getElementById('file');
+  var pickLabel = document.getElementById('pickLabel');
+  var statusEl = document.getElementById('status');
+  var wrap = document.getElementById('progressWrap');
+  var bar = document.getElementById('bar');
+  var busy = false;
+  var maxBytes = 50 * 1024 * 1024;
+  var types = ['mp3','m4a','aac','wav','flac','ogg'];
+  var functionBase = '__FUNCTION_BASE_URL__'.replace(/\/$/, '');
+  var token = new URLSearchParams(location.search).get('t') || '';
+
+  function setStatus(text, kind) {
+    statusEl.textContent = text;
+    statusEl.className = 'status' + (kind ? ' ' + kind : '');
+  }
+  function extOf(name) {
+    var i = name.lastIndexOf('.');
+    if (i <= 0) return '';
+    return name.slice(i + 1).toLowerCase();
+  }
+  function messages(code) {
+    if (code === 'token') return 'Эта ссылка уже не действует. Наведите камеру на QR на планшете ещё раз.';
+    if (code === 'type') return 'Этот файл не подойдёт. Нужен mp3, m4a, aac, wav, flac или ogg.';
+    if (code === 'size') return 'Файл больше 50 МБ. Выберите другой или сожмите его.';
+    if (code === 'empty') return 'Файл пустой. Выберите другой.';
+    return 'Не получилось загрузить. Проверьте интернет и попробуйте ещё раз.';
+  }
+  function guessType(file, ext) {
+    if (file.type && file.type !== 'application/octet-stream') return file.type;
+    return {
+      mp3: 'audio/mpeg',
+      m4a: 'audio/mp4',
+      aac: 'audio/aac',
+      wav: 'audio/wav',
+      flac: 'audio/flac',
+      ogg: 'audio/ogg'
+    }[ext] || 'application/octet-stream';
+  }
+
+  if (!token) {
+    setStatus('Откройте эту страницу по QR на планшете.', 'err');
+    pickLabel.setAttribute('aria-disabled', 'true');
+    fileInput.disabled = true;
+    return;
+  }
+  if (!functionBase || functionBase.indexOf('__FUNCTION') === 0) {
+    setStatus('Страница настроена не полностью. Сообщите администратору стенда.', 'err');
+    pickLabel.setAttribute('aria-disabled', 'true');
+    fileInput.disabled = true;
+    return;
+  }
+
+  fileInput.addEventListener('change', function () {
+    if (busy) return;
+    var file = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    if (!file) return;
+    if (file.size === 0) { setStatus(messages('empty'), 'err'); return; }
+    if (file.size > maxBytes) { setStatus(messages('size'), 'err'); return; }
+    var ext = extOf(file.name || '');
+    if (ext && types.indexOf(ext) < 0) { setStatus(messages('type'), 'err'); return; }
+    upload(file, ext);
+  });
+
+  function upload(file, ext) {
+    busy = true;
+    pickLabel.setAttribute('aria-disabled', 'true');
+    wrap.style.display = 'block';
+    bar.style.width = '0%';
+    setStatus('Подготовка…', '');
+    var contentType = guessType(file, ext);
+    fetch(functionBase + '?action=upload-url&token=' + encodeURIComponent(token), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: file.name || ('track.' + (ext || 'mp3')), size: file.size, contentType: contentType })
+    }).then(function (res) {
+      return res.json().then(function (json) { return { res: res, json: json }; });
+    }).then(function (out) {
+      if (!out.json || !out.json.ok || !out.json.putUrl) {
+        var code = (out.json && out.json.error) || (out.res.status === 410 || out.res.status === 403 ? 'token' : out.res.status === 413 ? 'size' : out.res.status === 415 ? 'type' : 'server');
+        throw { code: code };
+      }
+      return putFile(out.json.putUrl, file, out.json.contentType || contentType).then(function () {
+        return fetch(functionBase + '?action=complete&token=' + encodeURIComponent(token), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ objectKey: out.json.objectKey })
+        });
+      }).then(function (res) {
+        return res.json().then(function (json) { return { res: res, json: json }; });
+      }).then(function (done) {
+        if (!done.json || !done.json.ok) throw { code: (done.json && done.json.error) || 'server' };
+        bar.style.width = '100%';
+        setStatus('Готово. Трек уже на стенде, можно слушать.', 'ok');
+      });
+    }).catch(function (err) {
+      setStatus(messages(err && err.code ? err.code : 'server'), 'err');
+    }).then(function () {
+      busy = false;
+      pickLabel.removeAttribute('aria-disabled');
+    });
+  }
+
+  function putFile(url, file, contentType) {
+    return new Promise(function (resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('PUT', url);
+      xhr.setRequestHeader('Content-Type', contentType);
+      xhr.upload.onprogress = function (e) {
+        if (!e.lengthComputable) return;
+        var p = Math.round(e.loaded / e.total * 100);
+        bar.style.width = p + '%';
+        setStatus('Загрузка… ' + p + '%', '');
+      };
+      xhr.onerror = function () { reject({ code: 'server' }); };
+      xhr.onload = function () {
+        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        else reject({ code: xhr.status === 403 ? 'token' : 'server' });
+      };
+      xhr.send(file);
+    });
+  }
+})();
+</script>
+</body>
+</html>

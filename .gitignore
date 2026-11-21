@@ -13,6 +13,9 @@ tools/*
 !tools/publish_content.bat
 !tools/provision_tablet.bat
 !tools/provision_tablet.ps1
+!tools/deploy_upload_function.sh
+!tools/lifecycle-uploads.json
+!tools/bucket-policy.template.json
 /audio/
 AEROCELL*.html
 qr.png
@@ -23,3 +26,4 @@ keystore.properties
 *.keystore
 /AEROCELL-1*.apk
 /AEROCELL-release.apk
+upload-cloud.properties
