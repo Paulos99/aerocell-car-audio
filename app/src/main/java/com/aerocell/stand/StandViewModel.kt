@@ -62,6 +62,8 @@ data class StandUiState(
     val volume: Float = 0.85f,
     val waveform: ByteArray = ByteArray(0),
     val midEnergy: Float = 0f,
+    /** Интенсивность визуализатора 0, 50 или 100 %, настраивается в служебном меню. */
+    val vizIntensity: Int = 100,
     val updateAvailable: Boolean = false,
     val updateRequired: Boolean = false,
     val updateVersionName: String? = null,
@@ -121,6 +123,10 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
     private val installer = ApkInstaller(application)
     private val kiosk = KioskController(application)
     private val player = StandPlayer(application)
+    private val vizPrefs = application.getSharedPreferences("viz", Context.MODE_PRIVATE)
+
+    /** Уровень и удары бочки для визуализатора: UI читает их каждый кадр напрямую. */
+    val audioFeed: com.aerocell.stand.audio.AudioFeed get() = player
     private val wifi = WifiController(application)
     private val _state = MutableStateFlow(
         StandUiState(
@@ -186,7 +192,12 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.state.collect { sync -> applySync(sync) }
         }
-        _state.update { it.copy(onboarding = Onboarding.onStart(it.onboarding)) }
+        _state.update {
+            it.copy(
+                onboarding = Onboarding.onStart(it.onboarding),
+                vizIntensity = vizPrefs.getInt("intensity", 100)
+            )
+        }
         resumeUpdateScreenAfterRestart()
         viewModelScope.launch { updateScheduler() }
         registerNetworkCallback()
@@ -447,6 +458,17 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onLogoLongPress() {
         _state.update { it.copy(serviceMenuVisible = true) }
+    }
+
+    /** Ползунок интенсивности визуализатора в служебном меню: 0, 50 или 100 %. */
+    fun setVizIntensity(percent: Int) {
+        val v = when {
+            percent <= 25 -> 0
+            percent <= 75 -> 50
+            else -> 100
+        }
+        vizPrefs.edit().putInt("intensity", v).apply()
+        _state.update { it.copy(vizIntensity = v) }
     }
 
     fun dismissServiceMenu() {

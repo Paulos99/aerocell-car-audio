@@ -78,6 +78,8 @@ class MainActivity : ComponentActivity() {
                         onStop = viewModel::stop,
                         onPan = viewModel::setPan,
                         onVolume = viewModel::setVolume,
+                        onVizIntensity = viewModel::setVizIntensity,
+                        audioFeed = viewModel.audioFeed,
                         uploadState = upload,
                         onOpenUpload = viewModel::openUpload,
                         onCloseUpload = viewModel::closeUpload,

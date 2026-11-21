@@ -3,7 +3,9 @@ package com.aerocell.stand.audio
 import android.content.Context
 import android.media.MediaPlayer
 import android.media.audiofx.Visualizer
+import android.os.SystemClock
 import com.aerocell.stand.R
+import com.aerocell.stand.viz.KickDetector
 import java.io.File
 import kotlin.math.max
 
@@ -26,7 +28,19 @@ enum class StandTrack(
     }
 }
 
-class StandPlayer(private val context: Context) {
+/** То, что визуализатор читает каждый кадр. Поля пишет поток Visualizer, читает UI. */
+interface AudioFeed {
+    /** Общий уровень трека 0..1 (RMS волны, нормированный). */
+    val level: Float
+    /** Номер последнего удара бочки; меняется на каждом ударе. */
+    val kickSeq: Int
+    val kickStrong: Boolean
+    val kickPower: Float
+    /** Время последнего удара, SystemClock.uptimeMillis(). */
+    val kickAtMs: Long
+}
+
+class StandPlayer(private val context: Context) : AudioFeed {
     private var player: MediaPlayer? = null
     private var visualizer: Visualizer? = null
     private var pan: Float = 0f
@@ -38,6 +52,18 @@ class StandPlayer(private val context: Context) {
     @Volatile
     var midEnergy: Float = 0f
         private set
+
+    @Volatile override var level: Float = 0f
+        private set
+    @Volatile override var kickSeq: Int = 0
+        private set
+    @Volatile override var kickStrong: Boolean = false
+        private set
+    @Volatile override var kickPower: Float = 0f
+        private set
+    @Volatile override var kickAtMs: Long = 0L
+        private set
+    private val kicks = KickDetector()
 
     val isPlaying: Boolean get() = player?.isPlaying == true
     val position: Int get() = player?.currentPosition ?: 0
@@ -159,7 +185,13 @@ class StandPlayer(private val context: Context) {
         player?.setVolume(left, right)
     }
 
+    private fun resetFeed() {
+        level = 0f
+        kicks.reset()
+    }
+
     private fun releaseVisualizerOnly() {
+        resetFeed()
         try {
             visualizer?.enabled = false
             visualizer?.release()
@@ -184,6 +216,13 @@ class StandPlayer(private val context: Context) {
                         ) {
                             if (waveform != null) {
                                 this@StandPlayer.waveform = waveform.copyOf()
+                                var sum = 0.0
+                                for (b in waveform) {
+                                    val v = ((b.toInt() and 0xFF) - 128) / 128.0
+                                    sum += v * v
+                                }
+                                val rms = if (waveform.isEmpty()) 0.0 else kotlin.math.sqrt(sum / waveform.size)
+                                level = (rms * 2.4).toFloat().coerceIn(0f, 1f)
                             }
                         }
 
@@ -194,7 +233,8 @@ class StandPlayer(private val context: Context) {
                         ) {
                             if (fft == null || fft.size < 8) return
                             val n = fft.size / 2
-                            val nyquist = samplingRate / 2f
+                            // samplingRate приходит в миллигерцах.
+                            val nyquist = samplingRate / 2000f
                             val hzPerBin = if (n > 1) nyquist / (n - 1).toFloat() else 1f
                             var sum = 0.0
                             var count = 0
@@ -206,12 +246,34 @@ class StandPlayer(private val context: Context) {
                                 sum += re * re + im * im
                                 count++
                             }
-                            if (count == 0) return
-                            val rms = kotlin.math.sqrt(sum / count).toFloat()
-                            midEnergy = (rms / 40f).coerceIn(0f, 1f)
+                            if (count > 0) {
+                                val rms = kotlin.math.sqrt(sum / count).toFloat()
+                                midEnergy = (rms / 40f).coerceIn(0f, 1f)
+                            }
+                            // Низы 40–180 Гц для детектора бочки.
+                            var bassSum = 0.0
+                            var bassCount = 0
+                            for (i in 1 until n) {
+                                val hz = i * hzPerBin
+                                if (hz > 180f) break
+                                if (hz < 40f) continue
+                                val re = fft[i * 2].toInt()
+                                val im = fft[i * 2 + 1].toInt()
+                                bassSum += re * re + im * im
+                                bassCount++
+                            }
+                            val bass = if (bassCount == 0) 0f else (kotlin.math.sqrt(bassSum / bassCount) / 64.0).toFloat()
+                            val now = SystemClock.uptimeMillis()
+                            if (player?.isPlaying == true && kicks.feed(bass, now)) {
+                                kickStrong = kicks.lastStrong
+                                kickPower = kicks.lastPower
+                                kickAtMs = now
+                                kickSeq++
+                            }
                         }
                     },
-                    max(Visualizer.getMaxCaptureRate() / 2, 10000),
+                    // Максимальная частота (обычно 20 раз в секунду): удары бочки ловятся точнее.
+                    Visualizer.getMaxCaptureRate(),
                     true,
                     true
                 )

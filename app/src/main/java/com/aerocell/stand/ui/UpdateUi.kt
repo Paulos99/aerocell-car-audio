@@ -148,7 +148,8 @@ fun ServiceMenuDialog(
     onOpenWifi: () -> Unit = {},
     onExitKiosk: () -> Unit = {},
     onResumeKiosk: () -> Unit = {},
-    onClearKiosk: () -> Unit = {}
+    onClearKiosk: () -> Unit = {},
+    onVizIntensity: (Int) -> Unit = {}
 ) {
     var confirmClear by remember { mutableStateOf(false) }
 
@@ -225,6 +226,19 @@ fun ServiceMenuDialog(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MenuButton(label = "Показать режим простоя", filled = false, enabled = true, onClick = onShowIdle)
                 MenuButton(label = "Wi-Fi", filled = false, enabled = true, onClick = onOpenWifi)
+            }
+            Spacer(Modifier.height(14.dp))
+            Text("Визуализатор", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                for (p in listOf(0, 50, 100)) {
+                    MenuButton(
+                        label = "$p %",
+                        filled = state.vizIntensity == p,
+                        enabled = true,
+                        onClick = { onVizIntensity(p) }
+                    )
+                }
             }
             if (state.kioskEnabled) {
                 Spacer(Modifier.height(10.dp))

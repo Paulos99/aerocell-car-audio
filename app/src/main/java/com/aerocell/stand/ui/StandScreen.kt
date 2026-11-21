@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -59,6 +60,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -79,10 +81,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.aerocell.stand.viz.StageFx
+import com.aerocell.stand.viz.rememberStageFx
 import androidx.compose.ui.unit.sp
 import com.aerocell.stand.R
 import com.aerocell.stand.BuildConfig
 import com.aerocell.stand.StandUiState
+import com.aerocell.stand.audio.AudioFeed
 import com.aerocell.stand.audio.StandTrack
 import com.aerocell.stand.upload.UploadUiState
 import com.aerocell.stand.ui.theme.AeroBg
@@ -95,6 +104,7 @@ import com.aerocell.stand.ui.theme.AeroRedGlow
 import com.aerocell.stand.ui.theme.AeroSilver
 import com.aerocell.stand.ui.theme.AeroTrackDim
 import kotlinx.coroutines.delay
+import kotlin.math.abs
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -128,23 +138,57 @@ fun StandScreen(
     onCloseWifi: () -> Unit = {},
     onRescanWifi: () -> Unit = {},
     onConnectWifi: (WifiNetwork, String) -> Unit = { _, _ -> },
-    onOpenWifiSettings: () -> Unit = {}
+    onOpenWifiSettings: () -> Unit = {},
+    onVizIntensity: (Int) -> Unit = {},
+    audioFeed: AudioFeed? = null
 ) {
     var rowBounds by remember { mutableStateOf<Rect?>(null) }
     var faderBounds by remember { mutableStateOf<Rect?>(null) }
+    var stageBounds by remember { mutableStateOf<Rect?>(null) }
     val hintVisible = state.onboarding.hintVisible && !state.idleActive
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(AeroBg)
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            drawRect(
-                brush = Brush.radialGradient(
-                    colors = listOf(Color(0x28FF1A1A), Color.Transparent),
-                    center = Offset(size.width * 0.5f, size.height * 0.3f),
-                    radius = size.minDimension * 0.7f
+    val fx = rememberStageFx(
+        feed = audioFeed,
+        playing = state.playing && !state.idleActive,
+        pan = state.pan,
+        intensity = state.vizIntensity / 100f
+    )
+    val density = LocalDensity.current
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Фоновый слой: свечение, короба, волна и логотип. Только его искажают ударные волны,
+        // кнопки, плашки и плеер лежат выше и не гнутся.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { renderEffect = fx.renderEffect() }
+                .background(AeroBg)
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val center = Offset(size.width * 0.5f, size.height * 0.3f)
+                val radius = size.minDimension * 0.7f
+                drawCircle(Color(0xFFFF1A1A).copy(alpha = 0.10f), radius = radius * 0.35f, center = center)
+                drawCircle(Color(0xFFFF1A1A).copy(alpha = (0.06f + fx.bgBoost).coerceIn(0f, 0.3f) * 0.6f), radius = radius * 0.65f, center = center)
+                drawCircle(Color(0xFFFF1A1A).copy(alpha = (0.03f + fx.bgBoost * 0.5f).coerceIn(0f, 0.2f) * 0.5f), radius = radius, center = center)
+            }
+            stageBounds?.let { r ->
+                ComparisonStage(
+                    playing = state.playing,
+                    waveform = state.waveform,
+                    fx = fx,
+                    modifier = Modifier
+                        .offset { IntOffset(r.left.toInt(), r.top.toInt()) }
+                        .size(with(density) { r.width.toDp() }, with(density) { r.height.toDp() })
                 )
+            }
+            Image(
+                painter = painterResource(R.drawable.aerocell_qp_logo),
+                contentDescription = null,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(top = 4.dp)
+                    .fillMaxWidth(0.92f)
+                    .height(195.dp),
+                contentScale = ContentScale.Fit
             )
         }
         Column(
@@ -155,19 +199,19 @@ fun StandScreen(
         ) {
             // Reserve only a slim top gap — logo is drawn in an overlay above everything
             Spacer(Modifier.height(28.dp))
-            ComparisonStage(
-                playing = state.playing,
-                waveform = state.waveform,
-                pan = state.pan,
-                modifier = Modifier
+            // Место под сцену; сама сцена рисуется в фоновом слое ровно здесь.
+            Spacer(
+                Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    .onGloballyPositioned { stageBounds = it.boundsInRoot() }
             )
             Spacer(Modifier.height(6.dp))
             BalanceRow(
                 pan = state.pan,
                 onPan = onPan,
                 hintActive = hintVisible,
+                fx = fx,
                 onFaderPositioned = { inRoot, inWindow ->
                     faderBounds = inRoot
                     onFaderBoundsInWindow(inWindow)
@@ -195,21 +239,19 @@ fun StandScreen(
                 onSelectCustomTrack = onSelectCustomTrack
             )
         }
-        // Logo on top of all layers; size ~2.5× previous (~78.dp → ~195.dp)
-        Image(
-            painter = painterResource(R.drawable.aerocell_qp_logo),
-            contentDescription = "aerocell QP",
+        // Логотип нарисован в фоновом слое; здесь только невидимая зона длинного нажатия для служебного меню.
+        Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(top = 4.dp)
-                .fillMaxWidth(0.92f)
+                .fillMaxWidth(0.5f)
                 .height(195.dp)
                 .zIndex(10f)
+                .semantics { contentDescription = "aerocell QP" }
                 .pointerInput(Unit) {
                     detectTapGestures(onLongPress = { onLogoLongPress() })
-                },
-            contentScale = ContentScale.Fit
+                }
         )
         Text(
             text = "v${BuildConfig.VERSION_NAME}",
@@ -243,7 +285,8 @@ fun StandScreen(
                 onOpenWifi = onOpenWifi,
                 onExitKiosk = onExitKiosk,
                 onResumeKiosk = onResumeKiosk,
-                onClearKiosk = onClearKiosk
+                onClearKiosk = onClearKiosk,
+                onVizIntensity = onVizIntensity
             )
         }
         if (state.wifi.open) {
@@ -292,15 +335,9 @@ fun StandScreen(
 private fun ComparisonStage(
     playing: Boolean,
     waveform: ByteArray,
-    pan: Float,
+    fx: StageFx,
     modifier: Modifier = Modifier
 ) {
-    val bassPulse = rememberBassPulse(playing, waveform)
-    val leftLevel = if (pan <= 0f) 1f else 1f - pan
-    val rightLevel = if (pan >= 0f) 1f else 1f + pan
-    // Left = AEROCELL, Right = untreated (2x weaker)
-    val leftPulse = bassPulse * leftLevel
-    val rightPulse = bassPulse * rightLevel * 0.5f
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
@@ -309,12 +346,23 @@ private fun ComparisonStage(
         PulsingSpeaker(
             resId = R.drawable.speaker_aerocell_genio,
             contentDescription = "Короб AEROCELL",
-            pulse = leftPulse,
-            glowStrength = 1f,
+            scale = { fx.scaleL },
+            glow = { fx.glowL },
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
                 .padding(end = 4.dp)
+                .onGloballyPositioned { c ->
+                    // Картинка 1024×1024 вписана по центру: центр динамика (656, 505), радиус короба 0.46 стороны.
+                    val b = c.boundsInRoot()
+                    val side = minOf(b.width, b.height)
+                    val x0 = b.left + (b.width - side) / 2f
+                    val y0 = b.top + (b.height - side) / 2f
+                    val cx = x0 + side * 656f / 1024f
+                    val cy = y0 + side * 505f / 1024f
+                    val r = side * 0.46f
+                    fx.cone = Rect(cx - r, cy - r, cx + r, cy + r)
+                }
         )
         Column(
             modifier = Modifier
@@ -348,8 +396,9 @@ private fun ComparisonStage(
         PulsingSpeaker(
             resId = R.drawable.speaker_right,
             contentDescription = "Короб без обработки",
-            pulse = rightPulse,
-            glowStrength = 0.55f,
+            scale = { fx.scaleR },
+            glow = { fx.glowR },
+            silver = true,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
@@ -362,33 +411,32 @@ private fun ComparisonStage(
 private fun PulsingSpeaker(
     resId: Int,
     contentDescription: String,
-    pulse: Float,
-    glowStrength: Float,
-    modifier: Modifier = Modifier
+    scale: () -> Float,
+    glow: () -> Float,
+    modifier: Modifier = Modifier,
+    silver: Boolean = false
 ) {
     Box(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        // Glow strictly behind the enclosure — bright logo-style red haze
+        // Свечение за коробом: у AEROCELL красное, у короба без обработки тусклое серое.
         Canvas(
             modifier = Modifier
                 .fillMaxSize(0.98f)
                 .zIndex(0f)
         ) {
-            val base = (0.42f + pulse * 0.55f) * glowStrength
-            val r = size.minDimension * (0.48f + pulse * 0.08f)
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color(0xFFFF3A3A).copy(alpha = (base * 0.95f).coerceIn(0f, 0.95f)),
-                        Color(0xFFE53935).copy(alpha = (base * 0.55f).coerceIn(0f, 0.7f)),
-                        Color(0xFFB00000).copy(alpha = (base * 0.22f).coerceIn(0f, 0.4f)),
-                        Color.Transparent
-                    )
-                ),
-                radius = r
-            )
+            val g = glow().coerceIn(0f, 1.2f)
+            val r = size.minDimension * (0.48f + g * 0.06f)
+            if (silver) {
+                drawCircle(Color(0xFFC8C8CD).copy(alpha = (0.16f * g).coerceIn(0f, 0.3f)), radius = r * 0.82f)
+                drawCircle(Color(0xFF96969B).copy(alpha = (0.10f * g).coerceIn(0f, 0.2f)), radius = r * 0.55f)
+            } else {
+                drawCircle(Color(0xFFB00000).copy(alpha = (0.22f * g).coerceIn(0f, 0.4f)), radius = r)
+                drawCircle(Color(0xFFE53935).copy(alpha = (0.40f * g).coerceIn(0f, 0.6f)), radius = r * 0.7f)
+                drawCircle(Color(0xFFFF3A3A).copy(alpha = (0.50f * g).coerceIn(0f, 0.7f)), radius = r * 0.42f)
+                drawCircle(Color.White.copy(alpha = (0.22f * g).coerceIn(0f, 0.35f)), radius = r * 0.16f)
+            }
         }
         Image(
             painter = painterResource(resId),
@@ -397,49 +445,13 @@ private fun PulsingSpeaker(
                 .fillMaxSize()
                 .zIndex(1f)
                 .graphicsLayer {
-                    val s = 1f + pulse * 0.06f
-                    scaleX = s
-                    scaleY = s
+                    val sc = scale()
+                    scaleX = sc
+                    scaleY = sc
                 },
             contentScale = ContentScale.Fit
         )
     }
-}
-
-@Composable
-private fun rememberBassPulse(playing: Boolean, waveform: ByteArray): Float {
-    var smoothed by remember { mutableFloatStateOf(0f) }
-    val latestWave = rememberUpdatedState(waveform)
-    val latestPlaying = rememberUpdatedState(playing)
-    LaunchedEffect(Unit) {
-        while (true) {
-            withFrameMillis {
-                if (!latestPlaying.value) {
-                    smoothed += (0f - smoothed) * 0.2f
-                } else {
-                    val wave = latestWave.value
-                    if (wave.isEmpty()) {
-                        smoothed += (0f - smoothed) * 0.2f
-                    } else {
-                        var sum = 0.0
-                        val step = (wave.size / 64).coerceAtLeast(1)
-                        var count = 0
-                        var i = 0
-                        while (i < wave.size) {
-                            val v = ((wave[i].toInt() and 0xFF) - 128) / 128.0
-                            sum += v * v
-                            count++
-                            i += step
-                        }
-                        val rms = if (count == 0) 0f else sqrt(sum / count).toFloat()
-                        val target = (rms * 2.4f).coerceIn(0f, 1f)
-                        smoothed += (target - smoothed) * 0.28f
-                    }
-                }
-            }
-        }
-    }
-    return smoothed
 }
 
 @Composable
@@ -449,27 +461,33 @@ private fun SingleWave(
     modifier: Modifier = Modifier
 ) {
     var phase by remember { mutableFloatStateOf(0f) }
+    val playingNow = rememberUpdatedState(playing)
     LaunchedEffect(Unit) {
         var last = 0L
         while (true) {
             withFrameMillis { now ->
                 if (last != 0L) {
                     val dt = ((now - last).coerceAtMost(40)) / 1000f
-                    phase += dt * if (playing) 2.4f else 1.15f
+                    phase += dt * if (playingNow.value) 2.4f else 1.15f
                 }
                 last = now
             }
         }
     }
+    // Буферы создаём один раз: в кадре ничего не выделяем.
+    val samples = remember { FloatArray(WAVE_N) }
+    val path = remember { Path() }
     Canvas(modifier = modifier) {
-        val samples = waveSamples(waveform, playing, phase)
-        drawWaveBold(samples, playing, phase)
+        waveSamples(waveform, playing, phase, samples)
+        drawWaveBold(samples, playing, phase, path)
     }
 }
 
-private fun waveSamples(waveform: ByteArray, playing: Boolean, phase: Float): FloatArray {
-    val n = 140
-    val out = FloatArray(n)
+private const val WAVE_N = 140
+
+/** Волна как в 1.5.0: 140 точек из waveform плеера, в паузе — дыхание. */
+private fun waveSamples(waveform: ByteArray, playing: Boolean, phase: Float, out: FloatArray) {
+    val n = out.size
     if (playing && waveform.size >= n) {
         val step = waveform.size / n.toFloat()
         for (i in 0 until n) {
@@ -479,7 +497,7 @@ private fun waveSamples(waveform: ByteArray, playing: Boolean, phase: Float): Fl
             val shimmer = sin((x * 10f + phase * 2.2f) * Math.PI).toFloat() * 0.08f
             out[i] = (raw * 0.95f + shimmer).coerceIn(-1f, 1f)
         }
-        return out
+        return
     }
     val breath = 0.55f + 0.45f * sin(phase * 0.9).toFloat()
     for (i in 0 until n) {
@@ -492,36 +510,34 @@ private fun waveSamples(waveform: ByteArray, playing: Boolean, phase: Float): Fl
                 sin((x * 42.0 + phase * 3.4) * Math.PI) * 0.07
             ).toFloat() * envelope * 0.62f
     }
-    return out
 }
 
-private fun DrawScope.drawWaveBold(samples: FloatArray, playing: Boolean, phase: Float) {
+private fun DrawScope.drawWaveBold(samples: FloatArray, playing: Boolean, phase: Float, path: Path) {
     if (samples.isEmpty()) return
-    val path = Path()
+    path.reset()
     val last = samples.lastIndex.coerceAtLeast(1)
     val midY = size.height / 2f
     val amp = size.height * if (playing) 0.46f else 0.38f
-    samples.forEachIndexed { i, sample ->
+    for (i in samples.indices) {
         val x = size.width * i / last
-        val y = midY + sample * amp
+        val y = midY + samples[i] * amp
         if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
     }
     val pulse = (0.75f + 0.25f * sin(phase * 2.0).toFloat())
-    drawPath(
-        path,
-        AeroRed.copy(alpha = 0.18f * pulse),
-        style = Stroke(width = if (playing) 28f else 20f, cap = StrokeCap.Round)
-    )
-    drawPath(
-        path,
-        AeroRedGlow.copy(alpha = 0.5f * pulse),
-        style = Stroke(width = if (playing) 12f else 9f, cap = StrokeCap.Round)
-    )
-    drawPath(
-        path,
-        Color.White.copy(alpha = 0.95f),
-        style = Stroke(width = if (playing) 2.8f else 2.2f, cap = StrokeCap.Round)
-    )
+    drawPath(path, AeroRed.copy(alpha = 0.18f * pulse), style = Stroke(width = if (playing) 28f else 20f, cap = StrokeCap.Round))
+    drawPath(path, AeroRedGlow.copy(alpha = 0.5f * pulse), style = Stroke(width = if (playing) 12f else 9f, cap = StrokeCap.Round))
+    drawPath(path, Color.White.copy(alpha = 0.95f), style = Stroke(width = if (playing) 2.8f else 2.2f, cap = StrokeCap.Round))
+    // Белый блик на пиках волны.
+    for (i in 2 until samples.size - 2) {
+        val a = abs(samples[i])
+        if (a > 0.42f && a >= abs(samples[i - 1]) && a >= abs(samples[i + 1]) && a > abs(samples[i - 2])) {
+            val c = Offset(size.width * i / last, midY + samples[i] * amp)
+            val k = 0.7f * a * pulse
+            drawCircle(Color.White.copy(alpha = 0.18f * k), radius = 10f, center = c)
+            drawCircle(Color.White.copy(alpha = 0.35f * k), radius = 6f, center = c)
+            drawCircle(Color.White.copy(alpha = 0.7f * k), radius = 3f, center = c)
+        }
+    }
 }
 
 @Composable
@@ -530,6 +546,7 @@ private fun BalanceRow(
     onPan: (Float) -> Unit,
     modifier: Modifier = Modifier,
     hintActive: Boolean = false,
+    fx: StageFx? = null,
     onFaderPositioned: (Rect, Rect) -> Unit = { _, _ -> }
 ) {
     val density = androidx.compose.ui.platform.LocalDensity.current.density
@@ -557,12 +574,14 @@ private fun BalanceRow(
                 title = "Короб с обработкой",
                 accent = "AEROCELL",
                 alignEnd = false,
-                highlighted = hintActive && pan < -0.3f
+                highlighted = hintActive && pan < -0.3f,
+                meter = fx?.let { f -> { f.meterL } }
             )
             BalanceFader(
                 pan = pan,
                 onPan = onPan,
                 hintActive = hintActive,
+                halo = fx?.let { f -> { f.halo } },
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
@@ -596,12 +615,23 @@ private fun BalanceLabel(
     accent: String?,
     alignEnd: Boolean,
     modifier: Modifier = Modifier,
-    highlighted: Boolean = false
+    highlighted: Boolean = false,
+    meter: (() -> Float)? = null
 ) {
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
             .background(AeroPanelSoft)
+            .drawBehind {
+                // Индикатор уровня: плашка заполняется слева, как в прототипе.
+                val m = meter?.invoke()?.coerceIn(0f, 1f) ?: 0f
+                if (m > 0.002f) {
+                    val w = size.width * m
+                    drawRect(AeroRed.copy(alpha = 0.72f), size = Size(w * 0.55f, size.height))
+                    drawRect(Color(0xFFFF2828).copy(alpha = 0.40f), topLeft = Offset(w * 0.55f, 0f), size = Size(w * 0.30f, size.height))
+                    drawRect(Color(0xFFB00000).copy(alpha = 0.18f), topLeft = Offset(w * 0.85f, 0f), size = Size(w * 0.15f, size.height))
+                }
+            }
             .border(
                 if (highlighted) 1.5.dp else 1.dp,
                 if (highlighted) AeroRed else Color.White.copy(alpha = 0.12f),
@@ -662,7 +692,8 @@ private fun BalanceFader(
     pan: Float,
     onPan: (Float) -> Unit,
     modifier: Modifier = Modifier,
-    hintActive: Boolean = false
+    hintActive: Boolean = false,
+    halo: (() -> Float)? = null
 ) {
     var dragging by remember { mutableStateOf(false) }
     var autoInvite by remember { mutableStateOf(true) }
@@ -746,6 +777,15 @@ private fun BalanceFader(
                 end = Offset(mid, y + 14.dp.toPx()),
                 strokeWidth = 1.5f
             )
+            val h = halo?.invoke() ?: 0f
+            if (h > 0f) {
+                // Ореол бегунка по уровню музыки.
+                drawCircle(
+                    color = AeroRedGlow.copy(alpha = (0.22f * h).coerceIn(0f, 0.4f)),
+                    radius = (18.dp.toPx() + 14.dp.toPx() * h),
+                    center = Offset(thumbX, y)
+                )
+            }
             drawCircle(
                 color = AeroRed.copy(alpha = 0.28f * pulse),
                 radius = 18.dp.toPx() * pulse,
