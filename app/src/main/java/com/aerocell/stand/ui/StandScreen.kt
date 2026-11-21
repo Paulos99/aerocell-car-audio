@@ -64,6 +64,9 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asAndroidPath
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -162,13 +165,6 @@ fun StandScreen(
                 .graphicsLayer { renderEffect = fx.renderEffect() }
                 .background(AeroBg)
         ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val center = Offset(size.width * 0.5f, size.height * 0.3f)
-                val radius = size.minDimension * 0.7f
-                drawCircle(Color(0xFFFF1A1A).copy(alpha = 0.10f), radius = radius * 0.35f, center = center)
-                drawCircle(Color(0xFFFF1A1A).copy(alpha = (0.06f + fx.bgBoost).coerceIn(0f, 0.3f) * 0.6f), radius = radius * 0.65f, center = center)
-                drawCircle(Color(0xFFFF1A1A).copy(alpha = (0.03f + fx.bgBoost * 0.5f).coerceIn(0f, 0.2f) * 0.5f), radius = radius, center = center)
-            }
             stageBounds?.let { r ->
                 ComparisonStage(
                     playing = state.playing,
@@ -310,7 +306,7 @@ fun StandScreen(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(top = 20.dp, end = 24.dp)
+                .padding(top = 0.dp, end = 0.dp)
                 .zIndex(55f)
         )
         HelpPanel(
@@ -388,6 +384,7 @@ private fun ComparisonStage(
             SingleWave(
                 playing = playing,
                 waveform = waveform,
+                energy = { fx.env },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(100.dp)
@@ -420,22 +417,43 @@ private fun PulsingSpeaker(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        // Свечение за коробом: у AEROCELL красное, у короба без обработки тусклое серое.
+        // Мягкая подсветка за коробом: у AEROCELL красная и ярче на ударах низов, у короба без обработки тусклая серая.
+        // Радиальный градиент без резких краёв; рисуется и за пределами ячейки, слой сцены это позволяет.
         Canvas(
             modifier = Modifier
-                .fillMaxSize(0.98f)
+                .fillMaxSize()
                 .zIndex(0f)
         ) {
             val g = glow().coerceIn(0f, 1.2f)
-            val r = size.minDimension * (0.48f + g * 0.06f)
+            if (g <= 0.01f) return@Canvas
+            val c = Offset(size.width / 2f, size.height / 2f)
             if (silver) {
-                drawCircle(Color(0xFFC8C8CD).copy(alpha = (0.16f * g).coerceIn(0f, 0.3f)), radius = r * 0.82f)
-                drawCircle(Color(0xFF96969B).copy(alpha = (0.10f * g).coerceIn(0f, 0.2f)), radius = r * 0.55f)
+                val r = size.minDimension * 0.62f
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        0f to Color(0xFFC8C8CD).copy(alpha = (0.16f * g).coerceIn(0f, 0.22f)),
+                        0.55f to Color(0xFF96969B).copy(alpha = (0.07f * g).coerceIn(0f, 0.1f)),
+                        1f to Color.Transparent,
+                        center = c,
+                        radius = r
+                    ),
+                    radius = r,
+                    center = c
+                )
             } else {
-                drawCircle(Color(0xFFB00000).copy(alpha = (0.22f * g).coerceIn(0f, 0.4f)), radius = r)
-                drawCircle(Color(0xFFE53935).copy(alpha = (0.40f * g).coerceIn(0f, 0.6f)), radius = r * 0.7f)
-                drawCircle(Color(0xFFFF3A3A).copy(alpha = (0.50f * g).coerceIn(0f, 0.7f)), radius = r * 0.42f)
-                drawCircle(Color.White.copy(alpha = (0.22f * g).coerceIn(0f, 0.35f)), radius = r * 0.16f)
+                val r = size.minDimension * (0.70f + 0.10f * g)
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        0f to Color(0xFFFF2A2A).copy(alpha = (0.62f * g).coerceIn(0f, 0.7f)),
+                        0.32f to Color(0xFFE81212).copy(alpha = (0.40f * g).coerceIn(0f, 0.46f)),
+                        0.62f to Color(0xFFB00000).copy(alpha = (0.16f * g).coerceIn(0f, 0.2f)),
+                        1f to Color.Transparent,
+                        center = c,
+                        radius = r
+                    ),
+                    radius = r,
+                    center = c
+                )
             }
         }
         Image(
@@ -458,6 +476,7 @@ private fun PulsingSpeaker(
 private fun SingleWave(
     playing: Boolean,
     waveform: ByteArray,
+    energy: () -> Float = { 0f },
     modifier: Modifier = Modifier
 ) {
     var phase by remember { mutableFloatStateOf(0f) }
@@ -477,9 +496,10 @@ private fun SingleWave(
     // Буферы создаём один раз: в кадре ничего не выделяем.
     val samples = remember { FloatArray(WAVE_N) }
     val path = remember { Path() }
+    val paints = remember { WavePaints() }
     Canvas(modifier = modifier) {
         waveSamples(waveform, playing, phase, samples)
-        drawWaveBold(samples, playing, phase, path)
+        drawWaveBold(samples, playing, phase, path, energy().coerceIn(0f, 1f), paints)
     }
 }
 
@@ -512,7 +532,41 @@ private fun waveSamples(waveform: ByteArray, playing: Boolean, phase: Float, out
     }
 }
 
-private fun DrawScope.drawWaveBold(samples: FloatArray, playing: Boolean, phase: Float, path: Path) {
+/** Кисти неоновой волны. Создаются один раз; размытие — настоящий bloom через BlurMaskFilter. */
+private class WavePaints {
+    private fun stroke(color: Int, blur: Float) = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        style = android.graphics.Paint.Style.STROKE
+        strokeCap = android.graphics.Paint.Cap.ROUND
+        strokeJoin = android.graphics.Paint.Join.ROUND
+        this.color = color
+        if (blur > 0f) maskFilter = android.graphics.BlurMaskFilter(blur, android.graphics.BlurMaskFilter.Blur.NORMAL)
+    }
+    val bloomWide = stroke(0xFFFF1A1A.toInt(), 26f)
+    val bloomMid = stroke(0xFFFF3B3B.toInt(), 9f)
+    val coreRed = stroke(0xFFFF4A4A.toInt(), 0f)
+    val heat = stroke(0xFFFFE6E0.toInt(), 3f)
+    val coreWhite = stroke(0xFFFFFFFF.toInt(), 0f)
+    val peakGlow = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFFFFFFF.toInt()
+        maskFilter = android.graphics.BlurMaskFilter(9f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+    }
+    val peakDot = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt() }
+}
+
+private fun alpha255(a: Float): Int = (a.coerceIn(0f, 1f) * 255f).toInt()
+
+/**
+ * Форма и движение волны как в 1.5.0; поверх — неон: широкий красный bloom, красная сердцевина,
+ * горячая белая жила и белые блики на пиках. energy — огибающая низов, слегка подкачивает свечение.
+ */
+private fun DrawScope.drawWaveBold(
+    samples: FloatArray,
+    playing: Boolean,
+    phase: Float,
+    path: Path,
+    energy: Float,
+    p: WavePaints
+) {
     if (samples.isEmpty()) return
     path.reset()
     val last = samples.lastIndex.coerceAtLeast(1)
@@ -523,19 +577,38 @@ private fun DrawScope.drawWaveBold(samples: FloatArray, playing: Boolean, phase:
         val y = midY + samples[i] * amp
         if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
     }
-    val pulse = (0.75f + 0.25f * sin(phase * 2.0).toFloat())
-    drawPath(path, AeroRed.copy(alpha = 0.18f * pulse), style = Stroke(width = if (playing) 28f else 20f, cap = StrokeCap.Round))
-    drawPath(path, AeroRedGlow.copy(alpha = 0.5f * pulse), style = Stroke(width = if (playing) 12f else 9f, cap = StrokeCap.Round))
-    drawPath(path, Color.White.copy(alpha = 0.95f), style = Stroke(width = if (playing) 2.8f else 2.2f, cap = StrokeCap.Round))
-    // Белый блик на пиках волны.
-    for (i in 2 until samples.size - 2) {
-        val a = abs(samples[i])
-        if (a > 0.42f && a >= abs(samples[i - 1]) && a >= abs(samples[i + 1]) && a > abs(samples[i - 2])) {
-            val c = Offset(size.width * i / last, midY + samples[i] * amp)
-            val k = 0.7f * a * pulse
-            drawCircle(Color.White.copy(alpha = 0.18f * k), radius = 10f, center = c)
-            drawCircle(Color.White.copy(alpha = 0.35f * k), radius = 6f, center = c)
-            drawCircle(Color.White.copy(alpha = 0.7f * k), radius = 3f, center = c)
+    val pulse = (0.8f + 0.2f * sin(phase * 2.0).toFloat())
+    val boost = if (playing) 0.75f + 0.45f * energy else 0.6f
+    val ap = path.asAndroidPath()
+    drawIntoCanvas { canvas ->
+        val nc = canvas.nativeCanvas
+        p.bloomWide.strokeWidth = if (playing) 30f else 22f
+        p.bloomWide.alpha = alpha255(0.55f * pulse * boost)
+        nc.drawPath(ap, p.bloomWide)
+        p.bloomMid.strokeWidth = if (playing) 12f else 9f
+        p.bloomMid.alpha = alpha255(0.85f * pulse * boost)
+        nc.drawPath(ap, p.bloomMid)
+        p.coreRed.strokeWidth = if (playing) 6f else 4.5f
+        p.coreRed.alpha = alpha255(0.95f)
+        nc.drawPath(ap, p.coreRed)
+        p.heat.strokeWidth = if (playing) 4.5f else 3.5f
+        p.heat.alpha = alpha255(0.55f * boost)
+        nc.drawPath(ap, p.heat)
+        p.coreWhite.strokeWidth = if (playing) 2.4f else 2f
+        p.coreWhite.alpha = 255
+        nc.drawPath(ap, p.coreWhite)
+        // Белые блики на пиках волны.
+        for (i in 2 until samples.size - 2) {
+            val a = abs(samples[i])
+            if (a > 0.40f && a >= abs(samples[i - 1]) && a >= abs(samples[i + 1]) && a > abs(samples[i - 2])) {
+                val x = size.width * i / last
+                val y = midY + samples[i] * amp
+                val k = (a * pulse * boost).coerceIn(0f, 1f)
+                p.peakGlow.alpha = alpha255(0.75f * k)
+                nc.drawCircle(x, y, 9f + 6f * k, p.peakGlow)
+                p.peakDot.alpha = alpha255(0.95f * k)
+                nc.drawCircle(x, y, 2.6f + 1.4f * k, p.peakDot)
+            }
         }
     }
 }

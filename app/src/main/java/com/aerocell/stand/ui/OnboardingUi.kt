@@ -2,6 +2,7 @@ package com.aerocell.stand.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -65,21 +66,35 @@ import com.aerocell.stand.ui.theme.AeroRed
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
+/** Плавный ease-in-out для пальца подсказки. */
+private val HintEase = CubicBezierEasing(0.45f, 0f, 0.55f, 1f)
+
 private val TextShadow = Shadow(color = Color.Black.copy(alpha = 0.9f), offset = Offset(0f, 2f), blurRadius = 18f)
 
-/** Кнопка «?» 64 dp в правом верхнем углу. */
+/**
+ * Кнопка «?» в самом углу: кружок 32 dp без красной обводки,
+ * а зона касания 56 dp за счёт прозрачного поля вокруг.
+ */
 @Composable
 fun HelpButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
-            .size(64.dp)
-            .shadow(16.dp, CircleShape, ambientColor = AeroRed, spotColor = AeroRed)
-            .background(AeroPanel, CircleShape)
-            .border(1.5.dp, AeroRed, CircleShape)
-            .clickable(onClick = onClick),
+            .size(56.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            ),
         contentAlignment = Alignment.Center
     ) {
-        Text(text = "?", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.SemiBold)
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .background(AeroPanel.copy(alpha = 0.85f), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = "?", color = Color.White.copy(alpha = 0.9f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
@@ -116,14 +131,16 @@ fun HintOverlay(
                 for (target in HintGesture.WAYPOINTS) {
                     pan.animateTo(
                         target,
-                        spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessLow)
+                        tween(HintGesture.legMs(pan.value, target), easing = HintEase)
                     ) { latestPan.value(value) }
+                    delay(HintGesture.END_PAUSE_MS)
                 }
                 ripple = 0f
                 delay(HintGesture.PAUSE_MS)
             }
             // После трёх циклов подсказка остаётся статичной: палец ждёт на левом краю.
-            pan.animateTo(HintGesture.WAYPOINTS.first(), spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessLow))
+            val home = HintGesture.WAYPOINTS.first()
+            pan.animateTo(home, tween(HintGesture.legMs(pan.value, home), easing = HintEase)) { latestPan.value(value) }
             ripple = 1f
         }
 

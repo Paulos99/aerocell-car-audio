@@ -63,4 +63,14 @@ object HintGesture {
     const val MAX_CYCLES = 3
     const val PAUSE_MS = 800L
     val WAYPOINTS = listOf(-0.85f, 0.85f, 0f)
+    /** Полный проход от края до края, мс: палец идёт плавно, без рывка. */
+    const val SWEEP_MS = 2800
+    /** Пауза на каждой точке разворота, мс. */
+    const val END_PAUSE_MS = 450L
+    /** Длительность отрезка пропорциональна расстоянию, но не короче 900 мс. */
+    fun legMs(from: Float, to: Float): Int {
+        val full = WAYPOINTS.first() - WAYPOINTS[1]
+        val share = kotlin.math.abs(to - from) / kotlin.math.abs(full)
+        return (SWEEP_MS * share).toInt().coerceAtLeast(900)
+    }
 }

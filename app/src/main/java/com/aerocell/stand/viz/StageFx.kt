@@ -157,8 +157,8 @@ fun rememberStageFx(
                         val lagSec = ((SystemClock.uptimeMillis() - f.kickAtMs).coerceIn(0L, 200L)) / 1000f
                         kickAtSec = now - lagSec
                         kickStrong = f.kickStrong
-                        // Волны только от AEROCELL, по доле L.
-                        val drive = shareL * i * (0.6f + 0.4f * level)
+                        // Волны только от AEROCELL: сила удара по низам × доля L (посередине вполовину).
+                        val drive = shareL * i
                         fx.waves.onKick(now, f.kickStrong, f.kickPower, drive)
                     }
                 }
@@ -174,7 +174,10 @@ fun rememberStageFx(
                 fx.scaleL = Smooth.step(fx.scaleL, 1f + 0.06f * shareL * pulse, dt, if (attackL) 0.10f else 0.36f)
                 fx.scaleR = Smooth.step(fx.scaleR, 1f + 0.06f * shareR * pulse, dt, if (attackR) 0.10f else 0.36f)
                 fx.meterL = Smooth.step(fx.meterL, shareL * level * (0.35f + 0.65f * env) * i, dt, 0.22f)
-                fx.glowL = Smooth.step(fx.glowL, (if (on) 0.45f + 0.55f * env else 0.35f) * shareL * (0.4f + 0.6f * i), dt, 0.2f)
+                // Красная подсветка за AEROCELL: база + вспышка на ударе низов, по доле L.
+                val glowTarget = if (on) 0.38f + 0.62f * kickEnv * i else 0.32f
+                val glowUp = glowTarget > fx.glowL / max(shareL, 0.01f)
+                fx.glowL = Smooth.step(fx.glowL, glowTarget * shareL, dt, if (glowUp) 0.06f else 0.30f)
                 fx.glowR = Smooth.step(fx.glowR, (if (on) 0.30f + 0.20f * env else 0.25f) * shareR * (0.4f + 0.6f * i), dt, 0.25f)
                 fx.bgBoost = 0.06f + 0.09f * fx.env * shareL * i
                 fx.halo = 0.35f + 0.65f * fx.env * max(shareL, shareR) * i

@@ -24,71 +24,140 @@ object Smooth {
 }
 
 /**
- * Детектор удара бочки по энергии низов (40–160 Гц).
- * Порог плавающий: средний уровень × [ratio] + небольшой запас; между ударами не меньше [minIntervalMs].
- * Сильные удары (выше порога в [strongRatio] раз) ограничены: не больше [maxStrongPerSec] в секунду.
- * Работает на одном потоке, без выделений памяти.
+ * Энергия низов 30–150 Гц из кадра Visualizer (8-бит waveform, 128 = ноль).
+ * Считаем сами: окно Ханна + ДПФ ровно на частотах 30, 40 … 150 Гц.
+ * Встроенный FFT Visualizer считает без окна и в 8 битах, поэтому средние частоты
+ * скрипок и гитар протекают в нижние бины, и на классике волн было больше, чем на клубе.
+ * Таблицы считаются один раз на размер кадра и частоту дискретизации; в кадре без выделений.
+ * Результат: RMS амплитуд по частотам, полная синусоида внутри полосы даёт около 1.
+ */
+class BassBand(val size: Int, val sampleRateHz: Int) {
+    companion object {
+        const val LOW_HZ = 30
+        const val HIGH_HZ = 150
+        const val STEP_HZ = 10
+    }
+
+    private val freqs = (LOW_HZ..HIGH_HZ step STEP_HZ).toList()
+    private val cosT = FloatArray(freqs.size * size)
+    private val sinT = FloatArray(freqs.size * size)
+    private val norm: Float
+
+    init {
+        var wsum = 0.0
+        for (n in 0 until size) {
+            val w = 0.5 - 0.5 * kotlin.math.cos(2.0 * Math.PI * n / (size - 1))
+            wsum += w
+            for (f in freqs.indices) {
+                val ph = 2.0 * Math.PI * freqs[f] * n / sampleRateHz
+                cosT[f * size + n] = (w * kotlin.math.cos(ph)).toFloat()
+                sinT[f * size + n] = (w * kotlin.math.sin(ph)).toFloat()
+            }
+        }
+        norm = (2.0 / wsum).toFloat()
+    }
+
+    fun energy(waveform: ByteArray): Float {
+        if (waveform.size < size) return 0f
+        var acc = 0.0
+        for (f in freqs.indices) {
+            var re = 0f
+            var im = 0f
+            val o = f * size
+            for (n in 0 until size) {
+                val x = ((waveform[n].toInt() and 0xFF) - 128) / 128f
+                re += x * cosT[o + n]
+                im += x * sinT[o + n]
+            }
+            val m = kotlin.math.sqrt(re * re + im * im) * norm
+            acc += (m * m).toDouble()
+        }
+        return kotlin.math.sqrt(acc / freqs.size).toFloat()
+    }
+}
+
+/**
+ * Удар по низам: положительный прирост энергии 30–150 Гц (spectral flux) выше плавающего порога
+ * «среднее + k·σ» прироста, но не ниже [floor]; сама энергия низов не ниже [minEnergy].
+ * Между ударами не меньше [minIntervalMs]; сильных (прирост выше порога в [strongRatio] раз)
+ * не больше [maxStrongPerSec] в секунду. Пороги подобраны на трёх треках стенда
+ * (кадры 1024 отсчёта, 20 кадров в секунду). Один поток, без выделений.
  */
 class KickDetector(
     private val minIntervalMs: Long = 120L,
-    private val ratio: Float = 1.35f,
-    private val floor: Float = 0.06f,
-    private val strongRatio: Float = 1.25f,
-    private val maxStrongPerSec: Int = 3
+    private val k: Float = 1.5f,
+    private val floor: Float = 0.12f,
+    private val minEnergy: Float = 0.15f,
+    private val alpha: Float = 0.05f,
+    private val strongRatio: Float = 1.6f,
+    private val maxStrongPerSec: Int = 3,
+    private val warmupFrames: Int = 10
 ) {
-    private var average = 0f
-    private var lastKickAt = Long.MIN_VALUE / 2
+    private var prev = 0f
     private var primed = false
+    private var mean = 0f
+    private var variance = 0f
+    private var frames = 0
+    private var lastKickAt = Long.MIN_VALUE / 2
     private val strongTimes = LongArray(maxStrongPerSec) { Long.MIN_VALUE / 2 }
     private var strongIdx = 0
 
-    /** Последний удар был сильным. */
     var lastStrong: Boolean = false
         private set
 
-    /** Сила последнего удара 0..1 относительно порога. */
+    /** Сила последнего удара 0.35..1 по тому, насколько прирост превысил порог. */
     var lastPower: Float = 0f
         private set
 
-    val threshold: Float get() = max(floor, average * ratio)
+    /** Последний прирост энергии низов (для отладки). */
+    var lastFlux: Float = 0f
+        private set
 
-    /** true, если в этом отсчёте удар. */
-    fun feed(bass: Float, nowMs: Long): Boolean {
-        val b = bass.coerceAtLeast(0f)
+    val threshold: Float get() = max(floor, mean + k * kotlin.math.sqrt(variance))
+
+    fun feed(bassEnergy: Float, nowMs: Long): Boolean {
+        val e = bassEnergy.coerceAtLeast(0f)
         if (!primed) {
-            average = b
+            prev = e
             primed = true
             return false
         }
+        val flux = max(0f, e - prev)
+        prev = e
+        lastFlux = flux
         val th = threshold
         var kick = false
-        if (b > th && nowMs - lastKickAt >= minIntervalMs) {
+        if (frames >= warmupFrames && flux > th && e >= minEnergy && nowMs - lastKickAt >= minIntervalMs) {
             kick = true
             lastKickAt = nowMs
-            val strongCandidate = b > th * strongRatio
-            // Сильный, только если за последнюю секунду их было меньше maxStrongPerSec.
             val oldest = strongTimes[strongIdx]
-            lastStrong = strongCandidate && nowMs - oldest >= 1000L
+            lastStrong = flux > th * strongRatio && nowMs - oldest >= 1000L
             if (lastStrong) {
                 strongTimes[strongIdx] = nowMs
                 strongIdx = (strongIdx + 1) % strongTimes.size
             }
-            lastPower = ((b - th) / max(th, 1e-3f)).coerceIn(0f, 1f).let { 0.5f + 0.5f * it }
+            lastPower = 0.35f + 0.65f * ((flux - th) / max(th, 1e-3f)).coerceIn(0f, 1f)
         }
-        // Плавающий порог: быстрее растёт, медленнее падает.
-        val a = if (b > average) 0.18f else 0.06f
-        average += (b - average) * a
+        // Статистика прироста обновляется после решения, чтобы сам удар не поднимал себе порог.
+        val d = flux - mean
+        mean += alpha * d
+        variance = (1f - alpha) * (variance + alpha * d * d)
+        frames++
         return kick
     }
 
     fun reset() {
         primed = false
-        average = 0f
+        prev = 0f
+        mean = 0f
+        variance = 0f
+        frames = 0
         lastKickAt = Long.MIN_VALUE / 2
         for (i in strongTimes.indices) strongTimes[i] = Long.MIN_VALUE / 2
         strongIdx = 0
         lastStrong = false
         lastPower = 0f
+        lastFlux = 0f
     }
 }
 
@@ -135,11 +204,12 @@ class Shockwaves {
     var active: Int = 0
         private set
 
-    /** Удар бочки: решаем, сколько волн пустить. drive = доля L × уровень × интенсивность. */
+    /** Удар по низам: решаем, сколько волн пустить. drive = доля L × интенсивность. */
     fun onKick(nowSec: Float, strong: Boolean, kickPower: Float, drive: Float) {
         if (drive < MIN_DRIVE) return
-        if (!strong && drive <= WEAK_DRIVE) return
-        val p = (if (strong) 1f else 0.55f) * drive * kickPower.coerceIn(0.5f, 1f)
+        if (!strong && drive < WEAK_DRIVE) return
+        // Сила волны = сила удара по низам × доля L (× интенсивность).
+        val p = (if (strong) 1f else 0.7f) * drive * kickPower.coerceIn(0.35f, 1f)
         spawn(nowSec, p, drive)
         if (strong && drive > DOUBLE_DRIVE) spawn(nowSec + 0.11f, p * 0.72f, drive)
     }

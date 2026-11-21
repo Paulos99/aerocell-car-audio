@@ -5,6 +5,8 @@ import android.media.MediaPlayer
 import android.media.audiofx.Visualizer
 import android.os.SystemClock
 import com.aerocell.stand.R
+import android.util.Log
+import com.aerocell.stand.viz.BassBand
 import com.aerocell.stand.viz.KickDetector
 import java.io.File
 import kotlin.math.max
@@ -79,6 +81,7 @@ class StandPlayer(private val context: Context) : AudioFeed {
 
         this.pan = pan.coerceIn(-1f, 1f)
         this.volume = volume.coerceIn(0f, 1f)
+        trackTag = if (file != null) "own" else track.label
         val next = createPlayer(track, file) ?: return
         player = next
         applyLevels()
@@ -101,6 +104,7 @@ class StandPlayer(private val context: Context) : AudioFeed {
         midEnergy = 0f
         this.pan = pan.coerceIn(-1f, 1f)
         this.volume = volume.coerceIn(0f, 1f)
+        trackTag = "own"
         val next = try {
             MediaPlayer().apply {
                 setDataSource(file.absolutePath)
@@ -188,6 +192,7 @@ class StandPlayer(private val context: Context) : AudioFeed {
     private fun resetFeed() {
         level = 0f
         kicks.reset()
+        statStartMs = 0L
     }
 
     private fun releaseVisualizerOnly() {
@@ -202,9 +207,8 @@ class StandPlayer(private val context: Context) : AudioFeed {
 
     private fun attachVisualizer(sessionId: Int) {
         try {
-            val capture = Visualizer.getCaptureSizeRange()?.let { range ->
-                512.coerceIn(range[0], range[1])
-            } ?: 512
+            // Максимальный кадр (обычно 1024): так в окно попадает хотя бы период низкой ноты.
+            val capture = Visualizer.getCaptureSizeRange()?.let { range -> range[1] } ?: 1024
             visualizer = Visualizer(sessionId).apply {
                 captureSize = capture
                 setDataCaptureListener(
@@ -214,73 +218,80 @@ class StandPlayer(private val context: Context) : AudioFeed {
                             waveform: ByteArray?,
                             samplingRate: Int
                         ) {
-                            if (waveform != null) {
-                                this@StandPlayer.waveform = waveform.copyOf()
-                                var sum = 0.0
-                                for (b in waveform) {
-                                    val v = ((b.toInt() and 0xFF) - 128) / 128.0
-                                    sum += v * v
-                                }
-                                val rms = if (waveform.isEmpty()) 0.0 else kotlin.math.sqrt(sum / waveform.size)
-                                level = (rms * 2.4).toFloat().coerceIn(0f, 1f)
+                            if (waveform == null || waveform.isEmpty()) return
+                            // Для волны на экране — первые 512 отсчётов, как в 1.5.0 (тот же отрезок времени).
+                            this@StandPlayer.waveform = waveform.copyOf(minOf(UI_WAVE, waveform.size))
+                            var sum = 0.0
+                            for (b in waveform) {
+                                val v = ((b.toInt() and 0xFF) - 128) / 128.0
+                                sum += v * v
                             }
+                            val rms = kotlin.math.sqrt(sum / waveform.size)
+                            level = (rms * 2.4).toFloat().coerceIn(0f, 1f)
+                            onBass(waveform, samplingRate)
                         }
 
                         override fun onFftDataCapture(
                             visualizer: Visualizer?,
                             fft: ByteArray?,
                             samplingRate: Int
-                        ) {
-                            if (fft == null || fft.size < 8) return
-                            val n = fft.size / 2
-                            // samplingRate приходит в миллигерцах.
-                            val nyquist = samplingRate / 2000f
-                            val hzPerBin = if (n > 1) nyquist / (n - 1).toFloat() else 1f
-                            var sum = 0.0
-                            var count = 0
-                            for (i in 1 until n) {
-                                val hz = i * hzPerBin
-                                if (hz < 250f || hz > 2500f) continue
-                                val re = fft[i * 2].toInt()
-                                val im = fft[i * 2 + 1].toInt()
-                                sum += re * re + im * im
-                                count++
-                            }
-                            if (count > 0) {
-                                val rms = kotlin.math.sqrt(sum / count).toFloat()
-                                midEnergy = (rms / 40f).coerceIn(0f, 1f)
-                            }
-                            // Низы 40–180 Гц для детектора бочки.
-                            var bassSum = 0.0
-                            var bassCount = 0
-                            for (i in 1 until n) {
-                                val hz = i * hzPerBin
-                                if (hz > 180f) break
-                                if (hz < 40f) continue
-                                val re = fft[i * 2].toInt()
-                                val im = fft[i * 2 + 1].toInt()
-                                bassSum += re * re + im * im
-                                bassCount++
-                            }
-                            val bass = if (bassCount == 0) 0f else (kotlin.math.sqrt(bassSum / bassCount) / 64.0).toFloat()
-                            val now = SystemClock.uptimeMillis()
-                            if (player?.isPlaying == true && kicks.feed(bass, now)) {
-                                kickStrong = kicks.lastStrong
-                                kickPower = kicks.lastPower
-                                kickAtMs = now
-                                kickSeq++
-                            }
-                        }
+                        ) = Unit
                     },
-                    // Максимальная частота (обычно 20 раз в секунду): удары бочки ловятся точнее.
+                    // Максимальная частота (обычно 20 раз в секунду): удары ловятся точнее.
                     Visualizer.getMaxCaptureRate(),
                     true,
-                    true
+                    false
                 )
                 enabled = true
             }
         } catch (_: Throwable) {
             visualizer = null
         }
+    }
+
+    private var band: BassBand? = null
+    private var statStartMs = 0L
+    private var statKicks = 0
+    private var statStrong = 0
+
+    /** Низы 30–150 Гц → детектор удара. samplingRate приходит в миллигерцах. */
+    private fun onBass(waveform: ByteArray, samplingRateMilliHz: Int) {
+        val hz = (samplingRateMilliHz / 1000).takeIf { it in 8000..192000 } ?: 44100
+        val b = band?.takeIf { it.size == waveform.size && it.sampleRateHz == hz }
+            ?: BassBand(waveform.size, hz).also { band = it }
+        val bass = b.energy(waveform)
+        val now = SystemClock.uptimeMillis()
+        if (player?.isPlaying != true) {
+            statStartMs = 0L
+            return
+        }
+        if (kicks.feed(bass, now)) {
+            kickStrong = kicks.lastStrong
+            kickPower = kicks.lastPower
+            kickAtMs = now
+            kickSeq++
+            statKicks++
+            if (kickStrong) statStrong++
+            if (Log.isLoggable(TAG, Log.VERBOSE)) {
+                Log.v(TAG, "kick power=%.2f strong=%b flux=%.3f bass=%.3f".format(kickPower, kickStrong, kicks.lastFlux, bass))
+            }
+        }
+        if (statStartMs == 0L) {
+            statStartMs = now
+            statKicks = 0
+            statStrong = 0
+        } else if (now - statStartMs >= 30_000L) {
+            Log.i(TAG, "30s track=$trackTag kicks=$statKicks strong=$statStrong pos=${position / 1000}s rate=${hz}Hz size=${waveform.size}")
+            statStartMs = now
+            statKicks = 0
+            statStrong = 0
+        }
+    }
+
+    private var trackTag: String = ""
+
+    private companion object {
+        const val TAG = "AeroKick"
+        const val UI_WAVE = 512
     }
 }
