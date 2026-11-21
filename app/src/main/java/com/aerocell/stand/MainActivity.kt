@@ -101,6 +101,8 @@ class MainActivity : ComponentActivity() {
                         onClearKiosk = { viewModel.clearKiosk() },
                         onHintPan = viewModel::setPanFromHint,
                         onFaderBoundsInWindow = { faderBounds = it },
+                        onOpenWeb = viewModel::openWeb,
+                        onCloseWeb = viewModel::closeWeb,
                         onOpenHelp = viewModel::openHelp,
                         onCloseHelp = viewModel::closeHelp,
                         onOpenWifi = viewModel::openWifi,
@@ -133,7 +135,7 @@ class MainActivity : ComponentActivity() {
             // Пока идёт обновление, экран касания не принимает.
             return true
         }
-        if (action == MotionEvent.ACTION_DOWN && !s.idleActive && s.onboarding.hintVisible) {
+        if (action == MotionEvent.ACTION_DOWN && !s.idleActive && s.onboarding.hintVisible && s.web == null) {
             viewModel.onUserInteraction()
             viewModel.dismissHint()
             val onFader = faderBounds?.let { b ->

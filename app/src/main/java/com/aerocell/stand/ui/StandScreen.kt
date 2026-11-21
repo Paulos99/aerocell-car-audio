@@ -97,6 +97,7 @@ import com.aerocell.stand.StandUiState
 import com.aerocell.stand.audio.AudioFeed
 import com.aerocell.stand.audio.StandTrack
 import com.aerocell.stand.upload.UploadUiState
+import com.aerocell.stand.web.WebTarget
 import com.aerocell.stand.ui.theme.AeroBg
 import com.aerocell.stand.ui.theme.AeroMuted
 import com.aerocell.stand.ui.theme.AeroPanel
@@ -138,6 +139,8 @@ fun StandScreen(
     onFaderBoundsInWindow: (Rect) -> Unit = {},
     onOpenHelp: () -> Unit = {},
     onCloseHelp: () -> Unit = {},
+    onOpenWeb: (WebTarget) -> Unit = {},
+    onCloseWeb: () -> Unit = {},
     onOpenWifi: () -> Unit = {},
     onCloseWifi: () -> Unit = {},
     onRescanWifi: () -> Unit = {},
@@ -149,7 +152,7 @@ fun StandScreen(
     var rowBounds by remember { mutableStateOf<Rect?>(null) }
     var faderBounds by remember { mutableStateOf<Rect?>(null) }
     var stageBounds by remember { mutableStateOf<Rect?>(null) }
-    val hintVisible = state.onboarding.hintVisible && !state.idleActive
+    val hintVisible = state.onboarding.hintVisible && !state.idleActive && state.web == null
     val fx = rememberStageFx(
         feed = audioFeed,
         playing = state.playing && !state.idleActive,
@@ -260,6 +263,16 @@ fun StandScreen(
                 .padding(top = 90.dp, end = 24.dp)
                 .zIndex(11f)
         )
+        // Сайт STP и калькулятор: две компактные кнопки в левом верхнем углу, над коробом AEROCELL.
+        WebLinkButtons(
+            links = state.links,
+            onOpen = onOpenWeb,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(top = 14.dp, start = 20.dp)
+                .zIndex(12f)
+        )
         // Плашка обновления у верхнего края, левее кнопки «?» (64 dp + отступы).
         UpdatePill(
             state = state,
@@ -315,6 +328,17 @@ fun StandScreen(
             onClose = onCloseHelp,
             modifier = Modifier.zIndex(60f)
         )
+        // Окно с сайтом поверх всего, кроме экрана простоя и обновления.
+        // Это слой в том же окне, а не Dialog: касания идут через MainActivity и продлевают таймер простоя.
+        state.web?.let { panel ->
+            if (!state.idleActive) {
+                WebPanelOverlay(
+                    panel = panel,
+                    onClose = onCloseWeb,
+                    modifier = Modifier.zIndex(70f)
+                )
+            }
+        }
         IdleOverlay(
             active = state.idleActive,
             videos = state.idleVideos,

@@ -29,6 +29,8 @@ import com.aerocell.stand.update.UpdatePolicy
 import com.aerocell.stand.upload.UploadManager
 import com.aerocell.stand.upload.UploadUiState
 import com.aerocell.stand.upload.UploadedTrack
+import com.aerocell.stand.web.LinksConfig
+import com.aerocell.stand.web.WebTarget
 import com.aerocell.stand.wifi.WifiController
 import com.aerocell.stand.wifi.WifiNetwork
 import kotlinx.coroutines.Dispatchers
@@ -96,7 +98,20 @@ data class StandUiState(
     val cloudVersionName: String? = null,
     val cloudVersionCode: Int? = null,
     val onboarding: OnboardingState = OnboardingState(),
-    val wifi: WifiUiState = WifiUiState()
+    val wifi: WifiUiState = WifiUiState(),
+    /** Подписи и адреса кнопок «Сайт STP» и «Калькулятор» из config.links. */
+    val links: LinksConfig = LinksConfig(),
+    /** Открытое окно с сайтом или null. Закрывается крестиком и при уходе в простой. */
+    val web: WebPanelState? = null
+)
+
+/** Окно с сайтом поверх стенда. openId меняется при каждом открытии: так WebView создаётся заново. */
+data class WebPanelState(
+    val target: WebTarget,
+    val title: String,
+    val url: String,
+    val allowedDomains: Set<String>,
+    val openId: Long
 )
 
 data class WifiUiState(
@@ -329,6 +344,8 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
                 idleActive = true,
                 onboarding = Onboarding.onEnterIdle(it.onboarding),
                 wifi = WifiUiState(),
+                // Окно с сайтом закрывается вместе с уходом в простой; куки и кэш чистит само окно.
+                web = null,
                 // После работы персонала киоск снова запирается, когда стенд уходит в простой.
                 kioskLockTaskDesired = if (it.kioskEnabled) true else it.kioskLockTaskDesired
             )
@@ -368,7 +385,8 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 idleVideos = if (it.idleVideos == videos) it.idleVideos else videos,
                 idleTimeoutSec = config.timeoutSec,
-                idleVideoVolume = config.videoVolume
+                idleVideoVolume = config.videoVolume,
+                links = repository.linksConfig()
             )
         }
     }
@@ -402,6 +420,35 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
 
     fun closeHelp() {
         _state.update { it.copy(onboarding = Onboarding.closeHelp(it.onboarding)) }
+    }
+
+    // --- окно с сайтом STP и калькулятором ---
+
+    private var webOpenSeq = 0L
+
+    fun openWeb(target: WebTarget) {
+        onUserInteraction()
+        val links = repository.linksConfig()
+        val link = links.link(target)
+        webOpenSeq += 1
+        _state.update {
+            it.copy(
+                links = links,
+                onboarding = if (it.onboarding.helpOpen) Onboarding.closeHelp(it.onboarding) else it.onboarding,
+                web = WebPanelState(
+                    target = target,
+                    title = link.label,
+                    url = link.url,
+                    allowedDomains = links.allowedDomains(),
+                    openId = webOpenSeq
+                )
+            )
+        }
+    }
+
+    fun closeWeb() {
+        onUserInteraction()
+        _state.update { it.copy(web = null) }
     }
 
     // --- Wi-Fi из служебного меню ---
@@ -661,7 +708,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
                 silentFailed = ready != null && silentFailedFor == ready.apk.versionCode,
                 installing = installing,
                 playing = player.isPlaying,
-                visitorBusy = visitorBusy() || s.onboarding.helpOpen,
+                visitorBusy = visitorBusy() || s.onboarding.helpOpen || s.web != null,
                 serviceMenuOpen = s.serviceMenuVisible || s.wifi.open,
                 untouchedSinceStart = untouchedSinceStart,
                 sinceInteractionMs = now - lastInteractionAt,

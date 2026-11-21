@@ -38,7 +38,9 @@ data class ContentConfig(
     val rawJson: String?,
     val idle: IdleConfig = IdleConfig(),
     val update: UpdateConfig = UpdateConfig(),
-    val ownTrack: com.aerocell.stand.upload.OwnTrackConfig = com.aerocell.stand.upload.OwnTrackConfig()
+    val ownTrack: com.aerocell.stand.upload.OwnTrackConfig = com.aerocell.stand.upload.OwnTrackConfig(),
+    /** Ссылки «Сайт STP» и «Калькулятор» для окна с сайтом. */
+    val links: com.aerocell.stand.web.LinksConfig = com.aerocell.stand.web.LinksConfig()
 )
 
 /** Настройки режима простоя из config.idle манифеста. */
@@ -93,7 +95,8 @@ object ContentManifestParser {
                 rawJson = it.toString(),
                 idle = parseIdle(it.optJSONObject("idle")),
                 update = parseUpdate(it.optJSONObject("update")),
-                ownTrack = com.aerocell.stand.upload.OwnTrackConfig.parse(it.optJSONObject("ownTrack"))
+                ownTrack = com.aerocell.stand.upload.OwnTrackConfig.parse(it.optJSONObject("ownTrack")),
+                links = com.aerocell.stand.web.LinksConfig.parse(it.optJSONObject("links"))
             )
         }
         return ContentManifest(

@@ -127,6 +127,9 @@ class ContentRepository(private val context: Context) {
     fun ownTrackConfig(): com.aerocell.stand.upload.OwnTrackConfig =
         loadCachedManifest()?.config?.ownTrack ?: com.aerocell.stand.upload.OwnTrackConfig()
 
+    fun linksConfig(): com.aerocell.stand.web.LinksConfig =
+        loadCachedManifest()?.config?.links ?: com.aerocell.stand.web.LinksConfig()
+
     fun updateConfig(): UpdateConfig = loadCachedManifest()?.config?.update ?: UpdateConfig()
 
     /**

@@ -1,0 +1,506 @@
+package com.aerocell.stand.ui
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
+import android.net.http.SslError
+import android.view.ViewGroup
+import android.webkit.CookieManager
+import android.webkit.GeolocationPermissions
+import android.webkit.PermissionRequest
+import android.webkit.SslErrorHandler
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebStorage
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Calculate
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.aerocell.stand.WebPanelState
+import com.aerocell.stand.ui.theme.AeroMuted
+import com.aerocell.stand.ui.theme.AeroPanel
+import com.aerocell.stand.ui.theme.AeroPanelSoft
+import com.aerocell.stand.ui.theme.AeroRed
+import com.aerocell.stand.ui.theme.AeroRedGlow
+import com.aerocell.stand.web.DomainAllowlist
+import com.aerocell.stand.web.LinksConfig
+import com.aerocell.stand.web.WebTarget
+import kotlinx.coroutines.delay
+
+/** Две компактные кнопки «Сайт STP» и «Калькулятор» в стиле жанров. */
+@Composable
+fun WebLinkButtons(
+    links: LinksConfig,
+    onOpen: (WebTarget) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        WebLinkPill(label = links.site.label, icon = Icons.Filled.Language) { onOpen(WebTarget.SITE) }
+        WebLinkPill(label = links.calculator.label, icon = Icons.Filled.Calculate) { onOpen(WebTarget.CALCULATOR) }
+    }
+}
+
+@Composable
+private fun WebLinkPill(label: String, icon: ImageVector, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(50))
+            .background(AeroPanelSoft.copy(alpha = 0.92f))
+            .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(start = 12.dp, end = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(imageVector = icon, contentDescription = null, tint = AeroRedGlow, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = label.uppercase(),
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            letterSpacing = 1.sp,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
+/**
+ * Окно с сайтом: ~90 % экрана, скруглённые углы, затемнение под ним.
+ * Ходить можно только по доменам из белого списка; звонки, почта, чужие приложения,
+ * скачивания и выбор файлов заблокированы. При закрытии чистим куки, кэш и хранилище.
+ */
+@Composable
+fun WebPanelOverlay(
+    panel: WebPanelState,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var progress by remember(panel.openId) { mutableIntStateOf(0) }
+    var loading by remember(panel.openId) { mutableStateOf(true) }
+    var canGoBack by remember(panel.openId) { mutableStateOf(false) }
+    var failed by remember(panel.openId) { mutableStateOf(false) }
+    var failedUrl by remember(panel.openId) { mutableStateOf<String?>(null) }
+    var blockedTick by remember(panel.openId) { mutableIntStateOf(0) }
+
+    val webView = remember(panel.openId) {
+        createKioskWebView(
+            context = context,
+            allowed = panel.allowedDomains,
+            onProgress = { progress = it },
+            onLoading = { loading = it },
+            onHistory = { canGoBack = it },
+            onMainFrameError = { url ->
+                failed = true
+                failedUrl = url
+                loading = false
+            },
+            onBlocked = { blockedTick += 1 }
+        ).also { it.loadUrl(panel.url) }
+    }
+
+    DisposableEffect(webView) {
+        onDispose { destroyAndWipe(webView) }
+    }
+
+    // Аппаратная «Назад» (если вдруг доступна): сначала по истории страницы, потом закрыть окно.
+    BackHandler(enabled = true) {
+        if (webView.canGoBack()) webView.goBack() else onClose()
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.72f))
+            // Касания мимо окна не проходят к стенду, но и окно не закрывают: только крестик.
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {}
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .fillMaxHeight(0.9f)
+                .clip(RoundedCornerShape(22.dp))
+                .background(AeroPanel)
+                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(22.dp))
+        ) {
+            WebHeader(
+                title = panel.title,
+                canGoBack = canGoBack && !failed,
+                onBack = { if (webView.canGoBack()) webView.goBack() },
+                onClose = onClose
+            )
+            Box(Modifier.fillMaxWidth().height(3.dp)) {
+                if (loading && !failed) {
+                    LinearProgressIndicator(
+                        progress = { (progress.coerceIn(5, 100)) / 100f },
+                        modifier = Modifier.fillMaxSize(),
+                        color = AeroRed,
+                        trackColor = Color.White.copy(alpha = 0.08f)
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .background(Color.White)
+            ) {
+                AndroidView(
+                    factory = {
+                        (webView.parent as? ViewGroup)?.removeView(webView)
+                        webView
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+                if (failed) {
+                    OfflineScreen(
+                        onRetry = {
+                            failed = false
+                            loading = true
+                            progress = 0
+                            webView.loadUrl(failedUrl ?: panel.url)
+                        }
+                    )
+                }
+                BlockedToast(tick = blockedTick, modifier = Modifier.align(Alignment.BottomCenter))
+            }
+        }
+    }
+}
+
+@Composable
+private fun WebHeader(
+    title: String,
+    canGoBack: Boolean,
+    onBack: () -> Unit,
+    onClose: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(80.dp)
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Назад по страницам сайта. Зона касания 72 dp, как у крестика.
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(CircleShape)
+                .clickable(enabled = canGoBack, onClick = onBack)
+                .semantics { contentDescription = "Назад" },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = if (canGoBack) 0.95f else 0.25f),
+                modifier = Modifier.size(30.dp)
+            )
+        }
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text = title,
+            color = Color.White,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        // Большой крестик: зона касания 76 dp, видимый круг 56 dp.
+        Box(
+            modifier = Modifier
+                .size(76.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onClose)
+                .semantics { contentDescription = "Закрыть" },
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .background(AeroRed, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun OfflineScreen(onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AeroPanel)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {}
+            ),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Filled.WifiOff,
+            contentDescription = null,
+            tint = AeroRedGlow,
+            modifier = Modifier.size(56.dp)
+        )
+        Spacer(Modifier.height(18.dp))
+        Text(
+            text = "Нет интернета. Проверьте Wi-Fi",
+            color = Color.White,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Страница не открылась. Попробуйте ещё раз через пару секунд.",
+            color = AeroMuted,
+            fontSize = 16.sp,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(26.dp))
+        Box(
+            modifier = Modifier
+                .height(56.dp)
+                .clip(RoundedCornerShape(50))
+                .background(AeroRed)
+                .clickable(onClick = onRetry)
+                .padding(horizontal = 32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Попробовать снова", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+/** Короткая плашка, если посетитель нажал ссылку, которая ведёт за пределы сайта STP. */
+@Composable
+private fun BlockedToast(tick: Int, modifier: Modifier = Modifier) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(tick) {
+        if (tick == 0) return@LaunchedEffect
+        visible = true
+        delay(2_600)
+        visible = false
+    }
+    AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut(), modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .padding(bottom = 24.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color.Black.copy(alpha = 0.85f))
+                .padding(horizontal = 22.dp, vertical = 12.dp)
+        ) {
+            Text("Эта ссылка на стенде не открывается", color = Color.White, fontSize = 15.sp)
+        }
+    }
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+private fun createKioskWebView(
+    context: Context,
+    allowed: Set<String>,
+    onProgress: (Int) -> Unit,
+    onLoading: (Boolean) -> Unit,
+    onHistory: (Boolean) -> Unit,
+    onMainFrameError: (String?) -> Unit,
+    onBlocked: () -> Unit
+): WebView {
+    val webView = WebView(context)
+    webView.layoutParams = ViewGroup.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.MATCH_PARENT
+    )
+    webView.settings.apply {
+        javaScriptEnabled = true
+        domStorageEnabled = true
+        allowFileAccess = false
+        allowContentAccess = false
+        @Suppress("DEPRECATION")
+        allowFileAccessFromFileURLs = false
+        @Suppress("DEPRECATION")
+        allowUniversalAccessFromFileURLs = false
+        setGeolocationEnabled(false)
+        // target=_blank и window.open открываются в этом же окне и проходят ту же проверку доменов.
+        setSupportMultipleWindows(false)
+        javaScriptCanOpenWindowsAutomatically = false
+        // Ролики на сайте не включаются сами и не перебивают музыку стенда.
+        mediaPlaybackRequiresUserGesture = true
+        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        loadWithOverviewMode = true
+        useWideViewPort = true
+        builtInZoomControls = false
+        displayZoomControls = false
+        setSupportZoom(false)
+        @Suppress("DEPRECATION")
+        saveFormData = false
+    }
+    CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false)
+    // Без долгого нажатия: иначе выделение текста предлагает «Поделиться» и «Поиск в интернете».
+    webView.isLongClickable = false
+    webView.isHapticFeedbackEnabled = false
+    webView.setOnLongClickListener { true }
+    // Скачивания запрещены.
+    webView.setDownloadListener { _, _, _, _, _ -> onBlocked() }
+
+    webView.webViewClient = object : WebViewClient() {
+        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+            val url = request.url?.toString()
+            val scheme = request.url?.scheme?.lowercase()
+            if (!request.isForMainFrame) {
+                // Встроенные фреймы (карты, капча) можно, но только по http(s).
+                return scheme != "http" && scheme != "https"
+            }
+            if (DomainAllowlist.isAllowed(url, allowed)) return false
+            onBlocked()
+            return true
+        }
+
+        override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+            onLoading(true)
+        }
+
+        override fun onPageFinished(view: WebView, url: String?) {
+            onLoading(false)
+            onHistory(view.canGoBack())
+        }
+
+        override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+            onHistory(view.canGoBack())
+        }
+
+        override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+            if (request.isForMainFrame) onMainFrameError(request.url?.toString())
+        }
+
+        @SuppressLint("WebViewClientOnReceivedSslError")
+        override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
+            handler.cancel()
+            // Экран ошибки только если не открылась сама страница, а не картинка на ней.
+            if (view.url.isNullOrEmpty() || view.url == "about:blank" || error.url == view.url) {
+                onMainFrameError(error.url)
+            }
+        }
+    }
+
+    webView.webChromeClient = object : WebChromeClient() {
+        override fun onProgressChanged(view: WebView, newProgress: Int) {
+            onProgress(newProgress)
+        }
+
+        override fun onShowFileChooser(
+            webView: WebView,
+            filePathCallback: ValueCallback<Array<Uri>>,
+            fileChooserParams: FileChooserParams
+        ): Boolean {
+            // Выбор файлов на стенде не нужен.
+            filePathCallback.onReceiveValue(null)
+            onBlocked()
+            return true
+        }
+
+        override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message): Boolean = false
+
+        override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) {
+            callback.invoke(origin, false, false)
+        }
+
+        override fun onPermissionRequest(request: PermissionRequest) {
+            request.deny()
+        }
+    }
+    return webView
+}
+
+/** Закрыли окно: останавливаем страницу и стираем всё, что сайт успел сохранить. */
+private fun destroyAndWipe(webView: WebView) {
+    try {
+        webView.stopLoading()
+        webView.loadUrl("about:blank")
+        webView.clearHistory()
+        webView.clearCache(true)
+        webView.clearFormData()
+        (webView.parent as? ViewGroup)?.removeView(webView)
+        webView.destroy()
+    } catch (_: Throwable) {
+    }
+    try {
+        WebStorage.getInstance().deleteAllData()
+        CookieManager.getInstance().removeAllCookies(null)
+        CookieManager.getInstance().flush()
+    } catch (_: Throwable) {
+    }
+}
