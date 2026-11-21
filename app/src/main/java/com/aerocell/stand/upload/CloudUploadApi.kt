@@ -63,8 +63,8 @@ class CloudUploadApiClient(
         }
         return CloudStatus(
             status = body.optString("status", "waiting"),
-            filename = body.optString("filename").ifBlank { null },
-            extension = body.optString("extension").ifBlank { null },
+            filename = optText(body, "filename"),
+            extension = optText(body, "extension"),
             size = if (body.has("size") && !body.isNull("size")) body.optLong("size") else null,
             progress = parseProgress(body)
         )
@@ -147,6 +147,16 @@ class CloudUploadApiClient(
             .callTimeout(120, TimeUnit.SECONDS)
             .build()
     }
+}
+
+/**
+ * Строка из JSON или null. optString превращает JSON null в текст "null" — из-за этого
+ * в 1.6.0–1.6.1 пустая сессия выглядела как «телефон грузит файл null».
+ */
+internal fun optText(body: JSONObject, key: String): String? {
+    if (!body.has(key) || body.isNull(key)) return null
+    val s = body.optString(key).trim()
+    return s.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
 }
 
 /** Процент из ответа status: поле необязательное, всё вне 0..100 игнорируем. */
