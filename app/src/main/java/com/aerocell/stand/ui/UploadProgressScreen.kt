@@ -208,7 +208,7 @@ private fun UploadProgressScreen(state: UploadUiState, onCancel: () -> Unit) {
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                text = if (failed) "Не получилось загрузить" else state.stageTrackName ?: "Файл с телефона",
+                text = if (failed) "Не получилось загрузить" else com.aerocell.stand.upload.cleanName(state.stageTrackName) ?: "Ваш трек",
                 color = Color.White,
                 fontSize = 28.sp,
                 fontWeight = FontWeight.SemiBold,

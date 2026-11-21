@@ -65,9 +65,12 @@ class UploadManager(
 
     private fun now() = SystemClock.elapsedRealtime()
 
+    /** Экран загрузки показываем только для сессии, которую посетитель сам открыл кнопкой. */
+    private fun userSession(): Boolean = ui.modalOpen || ui.stage != UploadStage.NONE
+
     private val listener = object : VisitorUploadTransport.Listener {
         override fun onUploadStarted() {
-            if (cancelled) return
+            if (cancelled || !userSession()) return
             if (track != null) {
                 lastActivityAt = now()
             }
@@ -84,7 +87,7 @@ class UploadManager(
         }
 
         override fun onPhoneUploading(filename: String?, percent: Int?) {
-            if (cancelled) return
+            if (cancelled || !userSession()) return
             if (ui.stage == UploadStage.PREPARING || ui.stage == UploadStage.DONE) return
             // QR не убираем, пока телефон по-настоящему не начал грузить (процент пошёл).
             val decision = gate.onWaiting(percent, now())
@@ -101,7 +104,7 @@ class UploadManager(
             publish(
                 uploading = true,
                 stage = UploadStage.UPLOADING,
-                stageTrackName = filename ?: ui.stageTrackName,
+                stageTrackName = cleanName(filename) ?: ui.stageTrackName,
                 stageProgress = progress
             )
             startWatchdog()
@@ -272,12 +275,18 @@ class UploadManager(
     fun clearUploaded(notify: Boolean = false) {
         val had = track != null
         stopWatchdog()
+        main.removeCallbacks(clearStage)
         gate.reset()
+        // Старую облачную сессию закрываем: её поздние ответы не должны открыть экран загрузки.
+        cancelled = true
+        runCatching { transport.onModalChanged(false) }
+        runCatching { transport.resetSession() }
         store.clear()
         track = null
         token = UploadTokens.generate()
         lastActivityAt = 0L
         publish(
+            modalOpen = false,
             customTrack = null,
             customSelected = false,
             justUploaded = false,
@@ -316,7 +325,7 @@ class UploadManager(
     private fun handleAccepted(tempFile: File, filename: String, extension: String) {
         val saved = store.save(tempFile, extension)
         token = UploadTokens.generate()
-        val uploaded = UploadedTrack(saved, filename)
+        val uploaded = UploadedTrack(saved, cleanName(filename) ?: "Свой трек")
         track = uploaded
         lastActivityAt = SystemClock.elapsedRealtime()
         val link = runCatching { transport.currentLink(token) }
@@ -330,7 +339,7 @@ class UploadManager(
             pageUrl = link.pageUrl,
             serverFailed = link.failed,
             stage = UploadStage.DONE,
-            stageTrackName = ui.stageTrackName ?: filename,
+            stageTrackName = cleanName(ui.stageTrackName) ?: cleanName(filename),
             stageProgress = 1f
         )
         transport.onModalChanged(false)
@@ -380,4 +389,11 @@ class UploadManager(
         const val FAILED_HOLD_MS = 3_500L
         const val WATCHDOG_MS = 5_000L
     }
+}
+
+/** Имя файла без мусора: null, пустая строка и текст "null" считаются отсутствующим именем. */
+internal fun cleanName(name: String?): String? {
+    val s = name?.trim() ?: return null
+    if (s.isEmpty() || s.equals("null", ignoreCase = true) || s.equals("undefined", ignoreCase = true)) return null
+    return s
 }

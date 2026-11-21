@@ -180,6 +180,8 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { idleWatchdog() }
         ticker = viewModelScope.launch {
             while (isActive) {
+                // Пока свой трек играет, это считается активностью: сброс только после тишины без касаний.
+                if (_upload.value.customSelected && player.isPlaying) uploads.touch()
                 if (!resettingOwnTrack && uploads.shouldExpireSession()) {
                     resettingOwnTrack = true
                     viewModelScope.launch { resetOwnTrack() }
