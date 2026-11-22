@@ -7,28 +7,29 @@ import java.net.URI
 /** Одна ссылка для окна с сайтом: адрес и подпись на кнопке. */
 data class WebLink(val url: String, val label: String)
 
-/** Какую из ссылок открыли. */
-enum class WebTarget { SITE, CALCULATOR }
+/** Какую из ссылок открыли: плитки «Калькулятор» и «Каталог» главного меню. */
+enum class WebTarget { CATALOG, CALCULATOR }
 
 /**
- * Ссылки «Сайт STP» и «Калькулятор» из config.links манифеста.
+ * Ссылки «Каталог» и «Калькулятор» из config.links манифеста.
  * Если в манифесте ничего нет или адрес кривой, берём встроенные значения.
  *
  * Формат в манифесте:
  * "links": {
- *   "site": {"url": "https://stp-russia.ru/", "label": "Сайт STP"},
+ *   "catalog": {"url": "https://stp-russia.ru/catalog/", "label": "Каталог"},
  *   "calculator": {"url": "https://stp-russia.ru/calculation/", "label": "Калькулятор"},
  *   "allowedDomains": ["stp-russia.ru"]
  * }
  * Вместо объекта можно написать просто строку с адресом.
+ * Старый ключ "site" (1.7.0) читается как каталог, если "catalog" не задан.
  */
 data class LinksConfig(
-    val site: WebLink = DEFAULT_SITE,
+    val catalog: WebLink = DEFAULT_CATALOG,
     val calculator: WebLink = DEFAULT_CALCULATOR,
     val extraDomains: List<String> = emptyList()
 ) {
     fun link(target: WebTarget): WebLink = when (target) {
-        WebTarget.SITE -> site
+        WebTarget.CATALOG -> catalog
         WebTarget.CALCULATOR -> calculator
     }
 
@@ -36,20 +37,20 @@ data class LinksConfig(
     fun allowedDomains(): Set<String> {
         val out = LinkedHashSet<String>()
         out.addAll(BASE_DOMAINS)
-        DomainAllowlist.hostOf(site.url)?.let { out.add(it) }
+        DomainAllowlist.hostOf(catalog.url)?.let { out.add(it) }
         DomainAllowlist.hostOf(calculator.url)?.let { out.add(it) }
         extraDomains.forEach { d -> DomainAllowlist.normalizeDomain(d)?.let { out.add(it) } }
         return out
     }
 
     companion object {
-        const val DEFAULT_SITE_URL = "https://stp-russia.ru/"
+        const val DEFAULT_CATALOG_URL = "https://stp-russia.ru/catalog/"
         const val DEFAULT_CALCULATOR_URL = "https://stp-russia.ru/calculation/"
-        const val DEFAULT_SITE_LABEL = "Сайт STP"
+        const val DEFAULT_CATALOG_LABEL = "Каталог"
         const val DEFAULT_CALCULATOR_LABEL = "Калькулятор"
         const val MAX_LABEL = 24
 
-        val DEFAULT_SITE = WebLink(DEFAULT_SITE_URL, DEFAULT_SITE_LABEL)
+        val DEFAULT_CATALOG = WebLink(DEFAULT_CATALOG_URL, DEFAULT_CATALOG_LABEL)
         val DEFAULT_CALCULATOR = WebLink(DEFAULT_CALCULATOR_URL, DEFAULT_CALCULATOR_LABEL)
 
         /** Сайты STP: всегда разрешены вместе с поддоменами. */
@@ -58,7 +59,10 @@ data class LinksConfig(
         fun parse(obj: JSONObject?): LinksConfig {
             if (obj == null) return LinksConfig()
             return LinksConfig(
-                site = parseLink(obj.opt("site"), DEFAULT_SITE),
+                catalog = parseLink(
+                    if (obj.has("catalog") && !obj.isNull("catalog")) obj.opt("catalog") else obj.opt("site"),
+                    DEFAULT_CATALOG
+                ),
                 calculator = parseLink(obj.opt("calculator"), DEFAULT_CALCULATOR),
                 extraDomains = parseDomains(obj.optJSONArray("allowedDomains"))
             )

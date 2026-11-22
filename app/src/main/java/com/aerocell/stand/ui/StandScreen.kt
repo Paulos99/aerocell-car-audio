@@ -98,6 +98,15 @@ import com.aerocell.stand.audio.AudioFeed
 import com.aerocell.stand.audio.StandTrack
 import com.aerocell.stand.upload.UploadUiState
 import com.aerocell.stand.web.WebTarget
+import com.aerocell.stand.nav.AppScreen
+import com.aerocell.stand.nav.ScreenRules
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.layout.onPlaced
 import com.aerocell.stand.ui.theme.AeroBg
 import com.aerocell.stand.ui.theme.AeroMuted
 import com.aerocell.stand.ui.theme.AeroPanel
@@ -141,6 +150,8 @@ fun StandScreen(
     onCloseHelp: () -> Unit = {},
     onOpenWeb: (WebTarget) -> Unit = {},
     onCloseWeb: () -> Unit = {},
+    onOpenComparison: () -> Unit = {},
+    onBackToMenu: () -> Unit = {},
     onOpenWifi: () -> Unit = {},
     onCloseWifi: () -> Unit = {},
     onRescanWifi: () -> Unit = {},
@@ -152,7 +163,9 @@ fun StandScreen(
     var rowBounds by remember { mutableStateOf<Rect?>(null) }
     var faderBounds by remember { mutableStateOf<Rect?>(null) }
     var stageBounds by remember { mutableStateOf<Rect?>(null) }
-    val hintVisible = state.onboarding.hintVisible && !state.idleActive && state.web == null
+    val onComparison = state.screen == AppScreen.COMPARISON
+    val hintVisible = state.onboarding.hintVisible &&
+        ScreenRules.hintAllowed(state.screen, idle = state.idleActive, webOpen = state.web != null)
     val fx = rememberStageFx(
         feed = audioFeed,
         playing = state.playing && !state.idleActive,
@@ -160,7 +173,75 @@ fun StandScreen(
         intensity = state.vizIntensity / 100f
     )
     val density = LocalDensity.current
+    val cornerPx = with(density) { MenuTileCorner.toPx() }
+
+    // Плитки меню сообщают свои границы: из них раскрывается сравнение и вырастает окно с сайтом.
+    val tileBounds = remember { mutableStateMapOf<MenuTile, Rect>() }
+    // 0 — меню, 1 — сравнение на весь экран. Одна пружина, которую можно развернуть в любой момент.
+    val morph = remember { Animatable(if (onComparison) 1f else 0f) }
+    LaunchedEffect(state.screen) {
+        morph.animateTo(if (state.screen == AppScreen.COMPARISON) 1f else 0f, menuSpring())
+    }
+    val comparisonVisible by remember { derivedStateOf { morph.value > 0.001f } }
+    val comparisonOnTop = onComparison || comparisonVisible
+    val stageCoords = remember { StageCoords() }
+
+    // Аппаратная «Назад» на сравнении ведёт в меню, как стрелка.
+    BackHandler(enabled = onComparison && !state.idleActive && state.updateScreen == null) { onBackToMenu() }
+
     Box(modifier = Modifier.fillMaxSize()) {
+        MainMenu(
+            links = state.links,
+            onOpenComparison = onOpenComparison,
+            onOpenWeb = onOpenWeb,
+            onLogoLongPress = onLogoLongPress,
+            onTileBounds = { tile, r -> if (tileBounds[tile] != r) tileBounds[tile] = r },
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(1f)
+                .graphicsLayer {
+                    val s = MenuMotion.lerp(1f, MenuMotion.MENU_BEHIND_SCALE, morph.value)
+                    scaleX = s
+                    scaleY = s
+                }
+                .drawWithContent {
+                    drawContent()
+                    val z = morph.value
+                    if (z > 0.001f) drawRect(Color.Black.copy(alpha = MenuMotion.MENU_BEHIND_DIM * z.coerceIn(0f, 1f)))
+                }
+        )
+
+        // Сравнение всегда в композиции: шейдер, плеер и WebView не пересоздаются при переходах.
+        // Внешний слой обрезает его по прямоугольнику от плитки до экрана, внутренний масштабирует содержимое.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(if (comparisonOnTop) 2f else 0f)
+                .graphicsLayer {
+                    val z = morph.value
+                    val full = MotionRect(0f, 0f, size.width, size.height)
+                    val r = MenuMotion.lerp(tileBounds[MenuTile.COMPARISON]?.toMotion() ?: full, full, z)
+                    clip = true
+                    shape = InsetRoundShape(r, MenuMotion.lerp(cornerPx, 0f, z.coerceIn(0f, 1f)))
+                    alpha = if (z <= 0.001f && !onComparison) 0f else MenuMotion.contentAlpha(z)
+                }
+        ) {
+            CompositionLocalProvider(LocalStageCoords provides stageCoords) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val z = morph.value
+                        val full = MotionRect(0f, 0f, size.width, size.height)
+                        val r = MenuMotion.lerp(tileBounds[MenuTile.COMPARISON]?.toMotion() ?: full, full, z)
+                        val s = MenuMotion.coverScale(r, size.width, size.height)
+                        scaleX = s
+                        scaleY = s
+                        translationX = r.centerX - size.width / 2f
+                        translationY = r.centerY - size.height / 2f
+                    }
+                    .onPlaced { stageCoords.coords = it }
+            ) {
         // Фоновый слой: свечение, короба, волна и логотип. Только его искажают ударные волны,
         // кнопки, плашки и плеер лежат выше и не гнутся.
         Box(
@@ -204,7 +285,7 @@ fun StandScreen(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .onGloballyPositioned { stageBounds = it.boundsInRoot() }
+                    .onGloballyPositioned { stageBounds = it.boundsIn(stageCoords) }
             )
             Spacer(Modifier.height(6.dp))
             BalanceRow(
@@ -212,13 +293,13 @@ fun StandScreen(
                 onPan = onPan,
                 hintActive = hintVisible,
                 fx = fx,
-                onFaderPositioned = { inRoot, inWindow ->
-                    faderBounds = inRoot
+                onFaderPositioned = { inStage, inWindow ->
+                    faderBounds = inStage
                     onFaderBoundsInWindow(inWindow)
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .onGloballyPositioned { rowBounds = it.boundsInRoot() }
+                    .onGloballyPositioned { rowBounds = it.boundsIn(stageCoords) }
             )
             Spacer(Modifier.height(8.dp))
             UpdateBar(
@@ -253,6 +334,60 @@ fun StandScreen(
                     detectTapGestures(onLongPress = { onLogoLongPress() })
                 }
         )
+        // Стрелка назад в главное меню, на месте прежних кнопок сайта и калькулятора.
+        BackArrowButton(
+            onClick = onBackToMenu,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(top = 6.dp, start = 10.dp)
+                .zIndex(12f)
+        )
+        OwnTrackModal(state = uploadState, onClose = onCloseUpload)
+        UploadProgressOverlay(state = uploadState, onCancel = onCancelUpload, modifier = Modifier.zIndex(26f))
+        HintOverlay(
+            visible = hintVisible,
+            balanceRowBounds = rowBounds,
+            faderBounds = faderBounds,
+            onPan = onHintPan,
+            modifier = Modifier.zIndex(50f)
+        )
+        HelpButton(
+            onClick = onOpenHelp,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(top = 0.dp, end = 0.dp)
+                .zIndex(55f)
+        )
+        HelpPanel(
+            visible = state.onboarding.helpOpen && !state.idleActive && onComparison,
+            onClose = onCloseHelp,
+            modifier = Modifier.zIndex(60f)
+        )
+            }
+            }
+            // Пока сравнение сворачивается обратно, касание по меню не теряется:
+            // попадание в плитку сразу разворачивает движение туда, куда нажали.
+            if (!onComparison && comparisonVisible) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures(onTap = { p ->
+                                when (tileBounds.entries.firstOrNull { it.value.contains(p) }?.key) {
+                                    MenuTile.COMPARISON -> onOpenComparison()
+                                    MenuTile.CALCULATOR -> onOpenWeb(WebTarget.CALCULATOR)
+                                    MenuTile.CATALOG -> onOpenWeb(WebTarget.CATALOG)
+                                    null -> Unit
+                                }
+                            })
+                        }
+                )
+            }
+        }
+
+        // Дальше слои поверх обоих экранов.
         Text(
             text = "v${BuildConfig.VERSION_NAME}",
             color = AeroMuted,
@@ -260,18 +395,8 @@ fun StandScreen(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(top = 90.dp, end = 24.dp)
+                .padding(top = if (onComparison) 90.dp else 14.dp, end = 24.dp)
                 .zIndex(11f)
-        )
-        // Сайт STP и калькулятор: две компактные кнопки в левом верхнем углу, над коробом AEROCELL.
-        WebLinkButtons(
-            links = state.links,
-            onOpen = onOpenWeb,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(top = 14.dp, start = 20.dp)
-                .zIndex(12f)
         )
         // Плашка обновления у верхнего края, левее кнопки «?» (64 dp + отступы).
         UpdatePill(
@@ -283,8 +408,16 @@ fun StandScreen(
                 .padding(top = 20.dp, end = 104.dp)
                 .zIndex(12f)
         )
-        OwnTrackModal(state = uploadState, onClose = onCloseUpload)
-        UploadProgressOverlay(state = uploadState, onCancel = onCancelUpload, modifier = Modifier.zIndex(26f))
+        // Окно с сайтом вырастает из своей плитки и уходит в неё обратно.
+        WebPanelHost(
+            panel = state.web,
+            idle = state.idleActive,
+            originFor = { target ->
+                tileBounds[if (target == WebTarget.CALCULATOR) MenuTile.CALCULATOR else MenuTile.CATALOG]
+            },
+            onClose = onCloseWeb,
+            modifier = Modifier.zIndex(70f)
+        )
         if (state.serviceMenuVisible) {
             ServiceMenuDialog(
                 state = state,
@@ -308,37 +441,6 @@ fun StandScreen(
                 onOpenSettings = onOpenWifiSettings
             )
         }
-        HintOverlay(
-            visible = hintVisible,
-            balanceRowBounds = rowBounds,
-            faderBounds = faderBounds,
-            onPan = onHintPan,
-            modifier = Modifier.zIndex(50f)
-        )
-        HelpButton(
-            onClick = onOpenHelp,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(top = 0.dp, end = 0.dp)
-                .zIndex(55f)
-        )
-        HelpPanel(
-            visible = state.onboarding.helpOpen && !state.idleActive,
-            onClose = onCloseHelp,
-            modifier = Modifier.zIndex(60f)
-        )
-        // Окно с сайтом поверх всего, кроме экрана простоя и обновления.
-        // Это слой в том же окне, а не Dialog: касания идут через MainActivity и продлевают таймер простоя.
-        state.web?.let { panel ->
-            if (!state.idleActive) {
-                WebPanelOverlay(
-                    panel = panel,
-                    onClose = onCloseWeb,
-                    modifier = Modifier.zIndex(70f)
-                )
-            }
-        }
         IdleOverlay(
             active = state.idleActive,
             videos = state.idleVideos,
@@ -359,6 +461,7 @@ private fun ComparisonStage(
     fx: StageFx,
     modifier: Modifier = Modifier
 ) {
+    val stageCoords = LocalStageCoords.current
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
@@ -375,7 +478,7 @@ private fun ComparisonStage(
                 .padding(end = 4.dp)
                 .onGloballyPositioned { c ->
                     // Картинка 1024×1024 вписана по центру: центр динамика (656, 505), радиус короба 0.46 стороны.
-                    val b = c.boundsInRoot()
+                    val b = c.boundsIn(stageCoords)
                     val side = minOf(b.width, b.height)
                     val x0 = b.left + (b.width - side) / 2f
                     val y0 = b.top + (b.height - side) / 2f
@@ -647,6 +750,7 @@ private fun BalanceRow(
     fx: StageFx? = null,
     onFaderPositioned: (Rect, Rect) -> Unit = { _, _ -> }
 ) {
+    val stageCoords = LocalStageCoords.current
     val density = androidx.compose.ui.platform.LocalDensity.current.density
     Column(modifier = modifier) {
         Text(
@@ -686,7 +790,7 @@ private fun BalanceRow(
                     .onGloballyPositioned {
                         // Подсказке нужна видимая полоса, а касаниям — вся зона с запасом.
                         val pad = FaderTouchSidePad.value * density
-                        val root = it.boundsInRoot()
+                        val root = it.boundsIn(stageCoords)
                         val track = Rect(root.left + pad, root.top, root.right - pad, root.bottom)
                         onFaderPositioned(track, it.boundsInWindow())
                     }

@@ -102,6 +102,8 @@ class MainActivity : ComponentActivity() {
                         onHintPan = viewModel::setPanFromHint,
                         onFaderBoundsInWindow = { faderBounds = it },
                         onOpenWeb = viewModel::openWeb,
+                        onOpenComparison = viewModel::openComparison,
+                        onBackToMenu = viewModel::backToMenu,
                         onCloseWeb = viewModel::closeWeb,
                         onOpenHelp = viewModel::openHelp,
                         onCloseHelp = viewModel::closeHelp,
@@ -135,7 +137,9 @@ class MainActivity : ComponentActivity() {
             // Пока идёт обновление, экран касания не принимает.
             return true
         }
-        if (action == MotionEvent.ACTION_DOWN && !s.idleActive && s.onboarding.hintVisible && s.web == null) {
+        if (action == MotionEvent.ACTION_DOWN && !s.idleActive && s.onboarding.hintVisible && s.web == null &&
+            s.screen == com.aerocell.stand.nav.AppScreen.COMPARISON
+        ) {
             viewModel.onUserInteraction()
             viewModel.dismissHint()
             val onFader = faderBounds?.let { b ->

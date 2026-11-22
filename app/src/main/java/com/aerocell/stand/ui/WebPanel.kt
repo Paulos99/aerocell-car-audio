@@ -22,6 +22,11 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.Animatable
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -42,9 +47,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -61,7 +64,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -78,47 +80,40 @@ import com.aerocell.stand.ui.theme.AeroPanelSoft
 import com.aerocell.stand.ui.theme.AeroRed
 import com.aerocell.stand.ui.theme.AeroRedGlow
 import com.aerocell.stand.web.DomainAllowlist
-import com.aerocell.stand.web.LinksConfig
 import com.aerocell.stand.web.WebTarget
 import kotlinx.coroutines.delay
 
-/** Две компактные кнопки «Сайт STP» и «Калькулятор» в стиле жанров. */
+/**
+ * Держит окно с сайтом, пока оно анимируется: вырастает из плитки меню и уходит в неё обратно.
+ * WebView живёт, пока окно на экране; после закрытия он уничтожается, куки и кэш стираются.
+ */
 @Composable
-fun WebLinkButtons(
-    links: LinksConfig,
-    onOpen: (WebTarget) -> Unit,
+fun WebPanelHost(
+    panel: WebPanelState?,
+    idle: Boolean,
+    originFor: (WebTarget) -> Rect?,
+    onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        WebLinkPill(label = links.site.label, icon = Icons.Filled.Language) { onOpen(WebTarget.SITE) }
-        WebLinkPill(label = links.calculator.label, icon = Icons.Filled.Calculate) { onOpen(WebTarget.CALCULATOR) }
+    var shown by remember { mutableStateOf<WebPanelState?>(null) }
+    val growAnim = remember { Animatable(0f) }
+    LaunchedEffect(panel) {
+        if (panel != null) {
+            shown = panel
+            growAnim.animateTo(1f, menuSpring())
+        } else if (shown != null) {
+            if (idle) growAnim.snapTo(0f) else growAnim.animateTo(0f, menuSpring())
+            shown = null
+        }
     }
-}
-
-@Composable
-private fun WebLinkPill(label: String, icon: ImageVector, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .height(40.dp)
-            .clip(RoundedCornerShape(50))
-            .background(AeroPanelSoft.copy(alpha = 0.92f))
-            .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(50))
-            .clickable(onClick = onClick)
-            .padding(start = 12.dp, end = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(imageVector = icon, contentDescription = null, tint = AeroRedGlow, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = label.uppercase(),
-            color = Color.White,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-            letterSpacing = 1.sp,
-            maxLines = 1,
-            softWrap = false
-        )
-    }
+    val current = shown ?: return
+    WebPanelOverlay(
+        panel = current,
+        grow = { growAnim.value },
+        origin = originFor(current.target),
+        onClose = onClose,
+        modifier = modifier
+    )
 }
 
 /**
@@ -129,6 +124,8 @@ private fun WebLinkPill(label: String, icon: ImageVector, onClick: () -> Unit) {
 @Composable
 fun WebPanelOverlay(
     panel: WebPanelState,
+    grow: () -> Float,
+    origin: Rect?,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -165,22 +162,48 @@ fun WebPanelOverlay(
         if (webView.canGoBack()) webView.goBack() else onClose()
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.72f))
-            // Касания мимо окна не проходят к стенду, но и окно не закрывают: только крестик.
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = {}
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
+    var modalBounds by remember { mutableStateOf<Rect?>(null) }
+    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        // Затемнение проявляется вместе с ростом окна.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { alpha = MenuMotion.SCRIM_ALPHA * grow().coerceIn(0f, 1f) }
+                .background(Color.Black)
+                // Касания мимо окна не проходят к меню, но и окно не закрывают: только крестик.
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {}
+                )
+        )
+        // Внешний бокс без трансформаций: по нему знаем итоговое место окна.
+        Box(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
                 .fillMaxHeight(0.9f)
+                .onGloballyPositioned { modalBounds = it.boundsInRoot() }
+        ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val g = grow()
+                    val end = modalBounds?.toMotion()
+                    val start = origin?.toMotion()
+                    if (end != null && start != null && end.width > 0f && end.height > 0f) {
+                        val r = MenuMotion.lerp(start, end, g)
+                        scaleX = (r.width / end.width).coerceAtLeast(0.01f)
+                        scaleY = (r.height / end.height).coerceAtLeast(0.01f)
+                        translationX = r.centerX - end.centerX
+                        translationY = r.centerY - end.centerY
+                    } else {
+                        val s = MenuMotion.lerp(0.9f, 1f, g)
+                        scaleX = s
+                        scaleY = s
+                    }
+                    alpha = MenuMotion.contentAlpha(g, speed = 2.5f)
+                }
                 .clip(RoundedCornerShape(22.dp))
                 .background(AeroPanel)
                 .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(22.dp))
@@ -226,6 +249,7 @@ fun WebPanelOverlay(
                 }
                 BlockedToast(tick = blockedTick, modifier = Modifier.align(Alignment.BottomCenter))
             }
+        }
         }
     }
 }

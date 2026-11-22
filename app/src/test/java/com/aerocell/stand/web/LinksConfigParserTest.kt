@@ -15,8 +15,8 @@ class LinksConfigParserTest {
     @Test
     fun defaultsWithoutConfig() {
         val links = parse(null)
-        assertEquals(LinksConfig.DEFAULT_SITE_URL, links.site.url)
-        assertEquals("Сайт STP", links.site.label)
+        assertEquals("https://stp-russia.ru/catalog/", links.catalog.url)
+        assertEquals("Каталог", links.catalog.label)
         assertEquals(LinksConfig.DEFAULT_CALCULATOR_URL, links.calculator.url)
         assertEquals("Калькулятор", links.calculator.label)
     }
@@ -31,18 +31,38 @@ class LinksConfigParserTest {
     fun readsObjectsWithLabels() {
         val links = parse(
             """{"links": {
-                "site": {"url": "https://stplus.ru/aerocell/", "label": "Сайт"},
+                "catalog": {"url": "https://stp-russia.ru/catalog/aerocell-technology/", "label": "Материалы"},
                 "calculator": {"url": "https://stp-russia.ru/calculation/?tech=aerocell", "label": "Расчёт"}
             }}"""
         )
-        assertEquals(WebLink("https://stplus.ru/aerocell/", "Сайт"), links.site)
+        assertEquals(WebLink("https://stp-russia.ru/catalog/aerocell-technology/", "Материалы"), links.catalog)
         assertEquals(WebLink("https://stp-russia.ru/calculation/?tech=aerocell", "Расчёт"), links.calculator)
     }
 
     @Test
+    fun oldSiteKeyIsCatalogAlias() {
+        val links = parse("""{"links": {"site": {"url": "https://stplus.ru/aerocell/", "label": "Сайт STP"}}}""")
+        assertEquals(WebLink("https://stplus.ru/aerocell/", "Сайт STP"), links.catalog)
+        assertEquals(LinksConfig.DEFAULT_CALCULATOR, links.calculator)
+    }
+
+    @Test
+    fun catalogWinsOverSite() {
+        val links = parse("""{"links": {"site": "https://stplus.ru/", "catalog": "https://stp-russia.ru/catalog/x/"}}""")
+        assertEquals("https://stp-russia.ru/catalog/x/", links.catalog.url)
+        assertEquals("Каталог", links.catalog.label)
+    }
+
+    @Test
+    fun nullCatalogFallsBackToSite() {
+        val links = parse("""{"links": {"catalog": null, "site": "https://stplus.ru/"}}""")
+        assertEquals("https://stplus.ru/", links.catalog.url)
+    }
+
+    @Test
     fun readsPlainStringUrls() {
-        val links = parse("""{"links": {"site": "https://stplus.ru/", "calculator": " https://calc.stplus.ru/ "}}""")
-        assertEquals(WebLink("https://stplus.ru/", "Сайт STP"), links.site)
+        val links = parse("""{"links": {"catalog": "https://stplus.ru/", "calculator": " https://calc.stplus.ru/ "}}""")
+        assertEquals(WebLink("https://stplus.ru/", "Каталог"), links.catalog)
         assertEquals(WebLink("https://calc.stplus.ru/", "Калькулятор"), links.calculator)
     }
 
@@ -50,11 +70,11 @@ class LinksConfigParserTest {
     fun badUrlsFallBackToDefaults() {
         val links = parse(
             """{"links": {
-                "site": {"url": "tel:+78007757501", "label": "Позвонить"},
+                "catalog": {"url": "tel:+78007757501", "label": "Позвонить"},
                 "calculator": {"url": "", "label": null}
             }}"""
         )
-        assertEquals(LinksConfig.DEFAULT_SITE, links.site)
+        assertEquals(LinksConfig.DEFAULT_CATALOG, links.catalog)
         assertEquals(LinksConfig.DEFAULT_CALCULATOR, links.calculator)
     }
 
@@ -62,11 +82,11 @@ class LinksConfigParserTest {
     fun blankOrNullLabelKeepsDefaultAndLongLabelIsCut() {
         val links = parse(
             """{"links": {
-                "site": {"url": "https://stplus.ru/", "label": "   "},
+                "catalog": {"url": "https://stplus.ru/", "label": "   "},
                 "calculator": {"url": "https://stplus.ru/calc", "label": "Очень длинная подпись для кнопки калькулятора"}
             }}"""
         )
-        assertEquals("Сайт STP", links.site.label)
+        assertEquals("Каталог", links.catalog.label)
         assertEquals(LinksConfig.MAX_LABEL, links.calculator.label.length)
     }
 
@@ -80,13 +100,20 @@ class LinksConfigParserTest {
     }
 
     @Test
+    fun targetPicksLink() {
+        val links = LinksConfig()
+        assertEquals(links.catalog, links.link(WebTarget.CATALOG))
+        assertEquals(links.calculator, links.link(WebTarget.CALCULATOR))
+    }
+
+    @Test
     fun rawConfigKeepsLinksForCache() {
         val manifest = ContentManifestParser.parse(
-            """{"contentVersion": 5, "files": [], "config": {"links": {"site": "https://stplus.ru/x"}}}"""
+            """{"contentVersion": 5, "files": [], "config": {"links": {"catalog": "https://stplus.ru/x"}}}"""
         )
         val reparsed = ContentManifestParser.parse(
             """{"contentVersion": 5, "files": [], "config": ${manifest.config!!.rawJson}}"""
         )
-        assertEquals("https://stplus.ru/x", reparsed.config!!.links.site.url)
+        assertEquals("https://stplus.ru/x", reparsed.config!!.links.catalog.url)
     }
 }

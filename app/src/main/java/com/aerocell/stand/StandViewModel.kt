@@ -29,6 +29,8 @@ import com.aerocell.stand.update.UpdatePolicy
 import com.aerocell.stand.upload.UploadManager
 import com.aerocell.stand.upload.UploadUiState
 import com.aerocell.stand.upload.UploadedTrack
+import com.aerocell.stand.nav.AppScreen
+import com.aerocell.stand.nav.ScreenRules
 import com.aerocell.stand.web.LinksConfig
 import com.aerocell.stand.web.WebTarget
 import com.aerocell.stand.wifi.WifiController
@@ -99,7 +101,9 @@ data class StandUiState(
     val cloudVersionCode: Int? = null,
     val onboarding: OnboardingState = OnboardingState(),
     val wifi: WifiUiState = WifiUiState(),
-    /** Подписи и адреса кнопок «Сайт STP» и «Калькулятор» из config.links. */
+    /** Главное меню или сравнение. Стартуем с меню, после простоя тоже возвращаемся в меню. */
+    val screen: AppScreen = ScreenRules.START,
+    /** Подписи и адреса плиток «Каталог» и «Калькулятор» из config.links. */
     val links: LinksConfig = LinksConfig(),
     /** Открытое окно с сайтом или null. Закрывается крестиком и при уходе в простой. */
     val web: WebPanelState? = null
@@ -224,7 +228,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         uploads.markBuiltInSelected()
         val s = _state.value
         val file = repository.cachedTrackFile(track.genre)
-        player.prepare(track, s.pan, s.volume, autoplay = true, file = file)
+        player.prepare(track, s.pan, s.volume, autoplay = ScreenRules.musicAllowed(s.screen), file = file)
         cacheBoundFor = if (file != null) track else null
         _state.update { it.copy(track = track) }
         publish()
@@ -277,6 +281,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
 
     fun play() {
         uploads.touch()
+        if (!ScreenRules.musicAllowed(_state.value.screen)) return
         player.play()
         publish()
     }
@@ -346,6 +351,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
                 wifi = WifiUiState(),
                 // Окно с сайтом закрывается вместе с уходом в простой; куки и кэш чистит само окно.
                 web = null,
+                screen = ScreenRules.afterIdle(),
                 // После работы персонала киоск снова запирается, когда стенд уходит в простой.
                 kioskLockTaskDesired = if (it.kioskEnabled) true else it.kioskLockTaskDesired
             )
@@ -428,6 +434,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openWeb(target: WebTarget) {
         onUserInteraction()
+        if (!ScreenRules.webAllowed(_state.value.screen)) return
         val links = repository.linksConfig()
         val link = links.link(target)
         webOpenSeq += 1
@@ -449,6 +456,43 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
     fun closeWeb() {
         onUserInteraction()
         _state.update { it.copy(web = null) }
+    }
+
+    // --- главное меню ---
+
+    private var backFadeJob: Job? = null
+
+    /** Плитка «Сравнение». Если музыка ещё гаснет после «назад», возвращаем ей громкость. */
+    fun openComparison() {
+        onUserInteraction()
+        backFadeJob?.let {
+            it.cancel()
+            backFadeJob = null
+            player.applyVolume(_state.value.volume)
+        }
+        _state.update { it.copy(screen = AppScreen.COMPARISON, web = null) }
+        publish()
+    }
+
+    /** Стрелка «назад»: музыка плавно гаснет, экран сворачивается в плитку меню. */
+    fun backToMenu() {
+        onUserInteraction()
+        if (_state.value.screen == AppScreen.MENU) return
+        uploads.closeModal()
+        _state.update {
+            it.copy(
+                screen = AppScreen.MENU,
+                onboarding = if (it.onboarding.helpOpen) Onboarding.closeHelp(it.onboarding) else it.onboarding
+            )
+        }
+        if (player.isPlaying) {
+            backFadeJob?.cancel()
+            backFadeJob = viewModelScope.launch {
+                fadeOutMusic()
+                backFadeJob = null
+            }
+        }
+        publish()
     }
 
     // --- Wi-Fi из служебного меню ---
@@ -987,6 +1031,11 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
 
     /** После экрана загрузки музыка входит мягко, без щелчка. */
     private fun playCustomFadingIn(track: UploadedTrack) {
+        // Трек догрузился, а посетитель уже ушёл в меню: готовим его без звука.
+        if (!ScreenRules.musicAllowed(_state.value.screen)) {
+            playCustom(track, autoplay = false)
+            return
+        }
         val target = _state.value.volume
         val ok = player.prepareFromFile(track.file, _state.value.pan, 0f, autoplay = true)
         if (!ok) return
