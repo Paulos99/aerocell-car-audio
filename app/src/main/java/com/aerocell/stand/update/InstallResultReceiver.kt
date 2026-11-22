@@ -34,6 +34,10 @@ class InstallResultReceiver : BroadcastReceiver() {
             }
             PackageInstaller.STATUS_SUCCESS -> {
                 Log.i(TAG, "install succeeded")
+                // HyperOS не отдаёт MY_PACKAGE_REPLACED приложениям без «автозапуска», а этот ответ
+                // приходит всегда и уже в новый процесс. Поднимаем стенд отсюда, иначе на экране
+                // остаётся рабочий стол или «Недавние» и киоск не запирается.
+                relaunchStand(context)
             }
             else -> {
                 Log.e(TAG, "install failed status=$status message=$message")
@@ -41,6 +45,20 @@ class InstallResultReceiver : BroadcastReceiver() {
                 val app = context.applicationContext as? StandAppHolder
                 app?.contentRepository?.reportInstallFailed(text)
             }
+        }
+    }
+
+    private fun relaunchStand(context: Context) {
+        val launch = Intent(context, com.aerocell.stand.MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        }
+        try {
+            context.startActivity(launch)
+            UpdateLog.add("перезапускаю стенд после установки")
+        } catch (t: Throwable) {
+            UpdateLog.error("не удалось перезапустить стенд", t)
         }
     }
 
