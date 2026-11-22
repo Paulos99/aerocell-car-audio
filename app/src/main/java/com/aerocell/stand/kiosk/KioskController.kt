@@ -72,6 +72,62 @@ class KioskController(private val context: Context) {
         }
     }
 
+    /**
+     * Перед тихой установкой: разрешаем в режиме киоска окна системного установщика и проверки
+     * Xiaomi. Иначе HyperOS не может показать своё окно проверки, и установка падает с
+     * INSTALL_FAILED_USER_RESTRICTED «Install canceled by user». Список вернёт applyOwnerPolicies()
+     * при следующем входе в киоск. Ещё снимаем запреты на установку, если их ставили мы.
+     * Возвращает строку для журнала.
+     */
+    fun prepareForInstall(): String {
+        if (!isDeviceOwner()) return "не владелец устройства"
+        val notes = mutableListOf<String>()
+        val pm = context.packageManager
+        val present = INSTALLER_UI_PACKAGES.filter { pkg ->
+            try {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(pkg, 0)
+                true
+            } catch (_: Throwable) {
+                false
+            }
+        }
+        try {
+            dpm.setLockTaskPackages(adminComponent, (listOf(context.packageName) + present).toTypedArray())
+            notes += "в киоске разрешены: ${present.joinToString().ifEmpty { "—" }}"
+        } catch (t: Throwable) {
+            notes += "setLockTaskPackages: ${t.message}"
+        }
+        try {
+            val ours = dpm.getUserRestrictions(adminComponent)
+            for (key in INSTALL_RESTRICTIONS) {
+                if (ours.getBoolean(key, false)) {
+                    dpm.clearUserRestriction(adminComponent, key)
+                    notes += "снял запрет $key"
+                }
+            }
+        } catch (t: Throwable) {
+            notes += "запреты: ${t.message}"
+        }
+        try {
+            val um = context.getSystemService(Context.USER_SERVICE) as android.os.UserManager
+            val active = um.userRestrictions.keySet().filter { um.userRestrictions.getBoolean(it, false) }
+            notes += "запреты пользователя: ${active.joinToString().ifEmpty { "нет" }}"
+        } catch (t: Throwable) {
+            notes += "запреты пользователя: ${t.message}"
+        }
+        return notes.joinToString("; ")
+    }
+
+    /** Ставит киоск на паузу только на время установки: строку состояния и экран блокировки не трогаем. */
+    fun pauseLockTaskForInstall(activity: Activity) {
+        try {
+            activity.stopLockTask()
+        } catch (t: Throwable) {
+            Log.w(TAG, "pause lock task failed", t)
+        }
+    }
+
     fun startLockTask(activity: Activity) {
         if (!isDeviceOwner()) return
         applyOwnerPolicies()
@@ -130,5 +186,21 @@ class KioskController(private val context: Context) {
 
     companion object {
         private const val TAG = "AerocellKiosk"
+
+        /** Окна, которые система может открыть во время установки. */
+        private val INSTALLER_UI_PACKAGES = listOf(
+            "com.miui.securitycenter",
+            "com.miui.packageinstaller",
+            "com.miui.global.packageinstaller",
+            "com.google.android.packageinstaller",
+            "com.android.packageinstaller",
+            "com.lbe.security.miui"
+        )
+
+        private val INSTALL_RESTRICTIONS = listOf(
+            android.os.UserManager.DISALLOW_INSTALL_APPS,
+            android.os.UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES,
+            "no_install_unknown_sources_globally"
+        )
     }
 }

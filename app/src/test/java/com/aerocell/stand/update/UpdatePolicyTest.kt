@@ -19,11 +19,12 @@ class UpdatePolicyTest {
         visitorBusy: Boolean = false,
         serviceMenuOpen: Boolean = false,
         untouched: Boolean = false,
+        idleActive: Boolean = false,
         sinceInteractionMs: Long = 0L,
         readyForMs: Long = 0L,
         minuteOfDay: Int = 12 * 60
     ) = UpdateInputs(ready, origin, deviceOwner, silentFailed, installing, playing, visitorBusy,
-        serviceMenuOpen, untouched, sinceInteractionMs, readyForMs, minuteOfDay)
+        serviceMenuOpen, untouched, idleActive, sinceInteractionMs, readyForMs, minuteOfDay)
 
     @Test
     fun notReadyDoesNothing() {
@@ -41,6 +42,20 @@ class UpdatePolicyTest {
     fun idleTwoMinutesInstalls() {
         assertFalse(UpdatePolicy.decide(input(sinceInteractionMs = 119_000), cfg).installSilentlyNow)
         assertTrue(UpdatePolicy.decide(input(sinceInteractionMs = 120_000), cfg).installSilentlyNow)
+    }
+
+    @Test
+    fun idleScreenInstallsRightAway() {
+        // Ролики простоя уже идут: ждать ещё installAfterIdleSec не нужно.
+        assertTrue(UpdatePolicy.decide(input(idleActive = true, sinceInteractionMs = 5_000), cfg).installSilentlyNow)
+        // Но играющая музыка или открытое меню всё равно держат установку.
+        assertFalse(UpdatePolicy.decide(input(idleActive = true, serviceMenuOpen = true), cfg).installSilentlyNow)
+    }
+
+    @Test
+    fun nightInstallsWithoutQuietHours() {
+        val d = UpdatePolicy.decide(input(sinceInteractionMs = 600_000, minuteOfDay = 3 * 60), cfg)
+        assertTrue(d.installSilentlyNow)
     }
 
     @Test

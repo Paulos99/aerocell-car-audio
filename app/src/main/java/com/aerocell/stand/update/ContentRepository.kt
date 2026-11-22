@@ -150,6 +150,7 @@ class ContentRepository(private val context: Context) {
         val online = NetworkMonitor.hasInternet(context)
         val wifi = NetworkMonitor.isWifi(context)
         if (!online) {
+            UpdateLog.add("проверка облака: нет сети")
             _state.update {
                 it.copy(
                     checking = false,
@@ -184,6 +185,12 @@ class ContentRepository(private val context: Context) {
         val result = withContext(Dispatchers.IO) { fetchManifestRaw() }
         return result.fold(
             onSuccess = { (manifest, raw) ->
+                val apk = manifest.apk
+                UpdateLog.add(
+                    "проверка облака: в облаке " +
+                        (apk?.let { "${it.versionName} (${it.versionCode})" } ?: "нет APK") +
+                        ", у нас ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+                )
                 saveManifest(manifest, raw)
                 applyManifestToState(manifest, downloading = false)
                 val pending = pendingMedia(manifest)
@@ -202,6 +209,7 @@ class ContentRepository(private val context: Context) {
                 true
             },
             onFailure = { error ->
+                UpdateLog.error("проверка облака не удалась", error)
                 _state.update {
                     it.copy(
                         checking = false,
@@ -359,14 +367,17 @@ class ContentRepository(private val context: Context) {
         _state.update { it.copy(apkDownloading = true, apkProgress = 0f, statusText = "Скачиваю обновление…") }
         return try {
             val dest = localApkFile(apk)
+            if (!Sha256.matches(dest, apk.sha256)) UpdateLog.add("скачиваю ${apk.versionName}, ${apk.size / 1_000_000} МБ")
             val file = downloadFile(apk.url, dest, apk.sha256, apk.size) { written ->
                 val total = apk.size.takeIf { it > 0 } ?: written
                 onProgress(written)
                 _state.update { it.copy(apkProgress = (written.toFloat() / total.toFloat()).coerceIn(0f, 1f)) }
             }
             _state.update { it.copy(apkDownloading = false, apkProgress = 1f) }
+            UpdateLog.add("${apk.versionName} скачана, sha256 сошёлся")
             file
         } catch (t: Throwable) {
+            UpdateLog.error("скачивание ${apk.versionName}", t)
             _state.update {
                 it.copy(apkDownloading = false, apkProgress = null, lastError = t.message, statusText = "Не удалось скачать обновление")
             }

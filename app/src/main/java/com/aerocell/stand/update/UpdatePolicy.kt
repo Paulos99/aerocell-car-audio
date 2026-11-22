@@ -88,6 +88,8 @@ data class UpdateInputs(
     val serviceMenuOpen: Boolean,
     /** С запуска приложения экран ещё никто не трогал. */
     val untouchedSinceStart: Boolean,
+    /** Стенд уже в режиме простоя (ролики): значит, касаний не было давно. */
+    val idleActive: Boolean = false,
     /** Сколько прошло с последнего касания или звука, мс. */
     val sinceInteractionMs: Long,
     /** Сколько обновление уже ждёт после скачивания, мс. */
@@ -125,7 +127,7 @@ object UpdatePolicy {
         if (!busy && input.origin == CheckOrigin.STARTUP && input.untouchedSinceStart) {
             return UpdateDecision(true, UpdateButton.NONE, null)
         }
-        val idleEnough = input.sinceInteractionMs >= config.installAfterIdleSec * 1_000L
+        val idleEnough = input.idleActive || input.sinceInteractionMs >= config.installAfterIdleSec * 1_000L
         val inWindow = config.quietHours?.contains(input.minuteOfDay) ?: true
         if (!busy && idleEnough && inWindow) {
             return UpdateDecision(true, UpdateButton.NONE, null)

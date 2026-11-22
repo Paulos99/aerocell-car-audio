@@ -25,6 +25,7 @@ import com.aerocell.stand.update.SyncState
 import com.aerocell.stand.update.UpdateButton
 import com.aerocell.stand.update.UpdateFlagStore
 import com.aerocell.stand.update.UpdateInputs
+import com.aerocell.stand.update.UpdateLog
 import com.aerocell.stand.update.UpdatePolicy
 import com.aerocell.stand.upload.UploadManager
 import com.aerocell.stand.upload.UploadUiState
@@ -85,6 +86,8 @@ data class StandUiState(
     val idleVideoVolume: Float = IdleConfig.DEFAULT_VIDEO_VOLUME,
     val kioskEnabled: Boolean = false,
     val kioskLockTaskDesired: Boolean = false,
+    /** Киоск на паузе только на время тихой установки; новая версия запрёт его снова. */
+    val installLockPaused: Boolean = false,
     /** Плашка «Вышла версия … · Обновить» на главном экране. */
     val updateButton: UpdateButton = UpdateButton.NONE,
     /** Версия, которая скачана и проверена и ждёт установки. */
@@ -181,7 +184,10 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
     private var installing = false
     private var installingSilently = false
     private var installTimeout: Job? = null
-    private var silentFailedFor: Int? = null
+    /** Сколько раз тихая установка версии уже падала и когда в последний раз. */
+    private val silentFailures = mutableMapOf<Int, Int>()
+    private var lastSilentFailAt = 0L
+    private var lastLoggedReason: String? = null
     private var seenInstallFailures = 0
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
@@ -595,7 +601,8 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             // Ручное нажатие ставит сразу, не дожидаясь простоя.
-            val silentPossible = kiosk.isDeviceOwner() && silentFailedFor != ready.apk.versionCode
+            val silentPossible = kiosk.isDeviceOwner() &&
+                (silentFailures[ready.apk.versionCode] ?: 0) < MAX_SILENT_ATTEMPTS
             if (silentPossible) installSilently(ready) else installWithSystem(ready)
         }
     }
@@ -744,17 +751,19 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         val now = SystemClock.elapsedRealtime()
         val config = repository.updateConfig()
         val calendar = Calendar.getInstance()
+        val failures = ready?.let { silentFailures[it.apk.versionCode] } ?: 0
         val decision = UpdatePolicy.decide(
             UpdateInputs(
                 ready = ready != null,
                 origin = ready?.origin ?: CheckOrigin.BACKGROUND,
                 deviceOwner = kiosk.isDeviceOwner(),
-                silentFailed = ready != null && silentFailedFor == ready.apk.versionCode,
+                silentFailed = failures >= MAX_SILENT_ATTEMPTS,
                 installing = installing,
                 playing = player.isPlaying,
                 visitorBusy = visitorBusy() || s.onboarding.helpOpen || s.web != null,
                 serviceMenuOpen = s.serviceMenuVisible || s.wifi.open,
                 untouchedSinceStart = untouchedSinceStart,
+                idleActive = s.idleActive,
                 sinceInteractionMs = now - lastInteractionAt,
                 readyForMs = ready?.let { now - it.readyAtElapsed } ?: 0L,
                 minuteOfDay = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
@@ -762,10 +771,21 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
             config
         )
         val sync = repository.state.value
+        // После упавшей попытки ждём RETRY_BACKOFF_MS, потом пробуем снова, до MAX_SILENT_ATTEMPTS раз.
+        val backoffLeftMs = if (failures > 0) RETRY_BACKOFF_MS - (now - lastSilentFailAt) else 0L
+        val reason = when {
+            ready == null || installing -> null
+            decision.installSilentlyNow && backoffLeftMs > 0 -> "повтор через ${(backoffLeftMs / 60_000L) + 1} мин"
+            else -> decision.waitingReason
+        }
+        if (ready != null && reason != lastLoggedReason) {
+            lastLoggedReason = reason
+            UpdateLog.add("${ready.apk.versionName} ждёт установки: ${reason ?: "стенд свободен, ставлю"}")
+        }
         val status = when {
             installing -> "ставится"
-            ready != null && decision.waitingReason != null ->
-                "${ready.apk.versionName} скачана, ${decision.waitingReason}"
+            ready != null && reason != null ->
+                "${ready.apk.versionName} скачана, $reason"
             ready != null -> "${ready.apk.versionName} скачана"
             sync.apkDownloading -> "скачивается ${((sync.apkProgress ?: 0f) * 100).toInt()} %"
             downloadError != null -> "ошибка: $downloadError"
@@ -778,7 +798,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
                 updateStatus = status
             )
         }
-        if (decision.installSilentlyNow && ready != null) {
+        if (decision.installSilentlyNow && ready != null && backoffLeftMs <= 0) {
             viewModelScope.launch { installSilently(ready) }
         }
     }
@@ -808,6 +828,12 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
                 readyApk = null
                 throw IllegalStateException("файл обновления повреждён, скачаю заново")
             }
+            val attempt = (silentFailures[ready.apk.versionCode] ?: 0) + 1
+            val note = kiosk.prepareForInstall()
+            UpdateLog.add("ставлю ${ready.apk.versionName} тихо, попытка $attempt; $note")
+            // Киоск на паузе до перезапуска: в режиме блокировки HyperOS отменяет установку.
+            _state.update { it.copy(installLockPaused = true) }
+            delay(LOCK_PAUSE_SETTLE_MS)
             updateFlags.set(ready.apk.versionCode, ready.apk.versionName, System.currentTimeMillis())
             repository.markInstalling()
             withContext(Dispatchers.IO) {
@@ -817,6 +843,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
+            UpdateLog.add("сессия установки ${ready.apk.versionName} отправлена системе")
             _state.update {
                 it.copy(updateScreen = it.updateScreen?.copy(phase = UpdateScreenPhase.INSTALLING, progress = 1f))
             }
@@ -827,6 +854,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
             }
         } catch (t: Throwable) {
             Log.e(TAG, "silent install failed", t)
+            UpdateLog.error("тихая установка", t)
             repository.reportInstallFailed(t.message ?: "Не удалось установить обновление")
             onInstallFailed(t.message ?: "Не удалось установить обновление")
         }
@@ -872,14 +900,21 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         installTimeout?.cancel()
         installTimeout = null
         val wasSilent = installingSilently
+        val flagCode = updateFlags.read()?.targetVersionCode
         installing = false
         installingSilently = false
         updateFlags.clear()
         repository.clearInstalling()
         if (wasSilent) {
-            // Тихо не вышло — дальше только кнопка с подтверждением системы.
-            silentFailedFor = readyApk?.apk?.versionCode
+            // Тихо не вышло: повторим позже, после MAX_SILENT_ATTEMPTS — кнопка с подтверждением.
+            val code = readyApk?.apk?.versionCode ?: flagCode
+            if (code != null) silentFailures[code] = (silentFailures[code] ?: 0) + 1
+            lastSilentFailAt = SystemClock.elapsedRealtime()
+            lastLoggedReason = null
         }
+        UpdateLog.add("установка не удалась: $message")
+        // Возвращаем киоск: MainActivity запрёт экран снова.
+        _state.update { it.copy(installLockPaused = false) }
         Log.e(TAG, "install failed: $message")
         _state.update { it.copy(updateScreen = null, updateButtonBusy = false, lastError = message) }
     }
@@ -899,6 +934,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         ) {
             RestartOutcome.NONE -> Unit
             RestartOutcome.SHOW_DONE -> {
+                UpdateLog.add("обновление до ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) установлено, стенд перезапущен")
                 updateFlags.clear()
                 _state.update {
                     it.copy(updateScreen = UpdateScreenState(UpdateScreenPhase.DONE, BuildConfig.VERSION_NAME, 1f))
@@ -921,6 +957,7 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             RestartOutcome.EXPIRED -> {
+                UpdateLog.add("прошлое обновление до ${flag?.targetVersionName} не встало")
                 updateFlags.clear()
                 repository.reportError("Прошлое обновление не встало")
             }
@@ -1109,6 +1146,9 @@ class StandViewModel(application: Application) : AndroidViewModel(application) {
         private const val TAG = "AerocellKiosk"
         private const val CUSTOM_FADE_IN_MS = 450L
         private const val SCHEDULER_TICK_MS = 30_000L
+        private const val MAX_SILENT_ATTEMPTS = 3
+        private const val RETRY_BACKOFF_MS = 5 * 60_000L
+        private const val LOCK_PAUSE_SETTLE_MS = 600L
         private const val SCREEN_FADE_IN_MS = 450L
         private const val MUSIC_FADE_MS = 600L
         private const val DONE_HOLD_MS = 1_800L

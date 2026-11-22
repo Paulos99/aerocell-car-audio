@@ -53,10 +53,13 @@ class MainActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             viewModel.state
-                .map { it.kioskEnabled to it.kioskLockTaskDesired }
+                .map { Triple(it.kioskEnabled, it.kioskLockTaskDesired, it.installLockPaused) }
                 .distinctUntilChanged()
-                .collect { (enabled, desired) ->
-                    if (enabled && desired) {
+                .collect { (enabled, desired, pausedForInstall) ->
+                    if (enabled && desired && pausedForInstall) {
+                        // Тихая установка: HyperOS отменяет её, пока экран заперт в киоске.
+                        kiosk.pauseLockTaskForInstall(this@MainActivity)
+                    } else if (enabled && desired) {
                         kiosk.startLockTask(this@MainActivity)
                     } else if (enabled) {
                         kiosk.stopLockTask(this@MainActivity)
@@ -173,7 +176,7 @@ class MainActivity : ComponentActivity() {
         hideSystemBars()
         viewModel.onResume()
         val s = viewModel.state.value
-        if (s.kioskEnabled && s.kioskLockTaskDesired) {
+        if (s.kioskEnabled && s.kioskLockTaskDesired && !s.installLockPaused) {
             kiosk.startLockTask(this)
         }
     }

@@ -12,6 +12,10 @@ class StandLaunchReceiver : BroadcastReceiver() {
         val action = intent.action ?: return
         if (action !in ACTIONS) return
         Log.i(TAG, "launch after $action")
+        if (action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            com.aerocell.stand.update.UpdateLog.init(context)
+            com.aerocell.stand.update.UpdateLog.add("пакет заменён, запускаю стенд")
+        }
         val launch = Intent(context, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)

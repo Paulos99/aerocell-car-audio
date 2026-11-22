@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -138,6 +139,39 @@ fun UpdatePill(
 private val timeFormat = SimpleDateFormat("HH:mm", Locale("ru"))
 private fun fmtTime(ms: Long?): String = ms?.let { timeFormat.format(Date(it)) } ?: "—"
 
+/** Последние записи журнала обновлений, новые сверху. Полный журнал: files/update-log.txt. */
+@Composable
+private fun UpdateLogBlock() {
+    val lines by com.aerocell.stand.update.UpdateLog.lines.collectAsState()
+    Spacer(Modifier.height(10.dp))
+    Text("Журнал обновлений", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+    Spacer(Modifier.height(4.dp))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.Black.copy(alpha = 0.35f))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        val recent = lines.takeLast(LOG_LINES_SHOWN).asReversed()
+        if (recent.isEmpty()) {
+            Text("пока пусто", color = AeroMuted, fontSize = 12.sp)
+        }
+        recent.forEach { line ->
+            Text(
+                text = line,
+                color = if (line.contains("ОШИБКА") || line.contains("не удалась") || line.contains("не встало")) AeroRed else AeroSilver,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+            )
+        }
+    }
+    Spacer(Modifier.height(6.dp))
+}
+
+private const val LOG_LINES_SHOWN = 14
+
 @Composable
 fun ServiceMenuDialog(
     state: StandUiState,
@@ -184,6 +218,7 @@ fun ServiceMenuDialog(
                 "последняя ${fmtTime(state.lastCheckAtMs)}$lastOk, следующая ${fmtTime(state.nextCheckAtMs)}"
             )
             MenuLine("Обновление", state.updateStatus ?: "—")
+            UpdateLogBlock()
             val content = state.contentVersion?.let { "версия $it, файлов в кэше ${state.cachedFiles}" }
                 ?: "пока нет (встроенные треки)"
             MenuLine("Контент", content)
