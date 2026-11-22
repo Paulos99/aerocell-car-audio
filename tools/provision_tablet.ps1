@@ -365,6 +365,16 @@ if ($ownerSet) {
     }
 }
 
+# HyperOS/MIUI: без «Автозапуска» (MIUI op 10008) и «Запуска в фоне» (op 10021) стенд не поднимется
+# сам после тихого обновления из облака: система не отдаёт MY_PACKAGE_REPLACED и запрещает старт экрана.
+# На других прошивках этих операций нет, ошибку просто пишем в лог.
+Write-Log ''
+Write-Log 'Разрешаю стенду автозапуск и запуск в фоне (нужно для обновлений из облака на Xiaomi)...'
+foreach ($op in @('10008', '10021')) {
+    $ops = Invoke-Adb -Arguments @('shell', 'appops', 'set', 'com.aerocell.stand', $op, 'allow')
+    foreach ($line in $ops.Lines) { Write-Log "  $line" }
+}
+
 Write-Log ''
 Write-Log 'Запускаю приложение...'
 $start = Invoke-Adb -Arguments @('shell', 'am', 'start', '-W', '-n', 'com.aerocell.stand/.MainActivity')

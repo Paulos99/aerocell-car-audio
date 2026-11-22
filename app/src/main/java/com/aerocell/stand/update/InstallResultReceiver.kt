@@ -59,11 +59,27 @@ class InstallResultReceiver : BroadcastReceiver() {
             UpdateLog.add("перезапускаю стенд после установки")
         } catch (t: Throwable) {
             UpdateLog.error("не удалось перезапустить стенд", t)
+            return
         }
+        // HyperOS может молча отклонить запуск экрана из фона. Проверяем через несколько секунд,
+        // чтобы в журнале было видно причину, если стенд так и не поднялся.
+        val pending = goAsync()
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (!com.aerocell.stand.MainActivity.standOnScreen) {
+                UpdateLog.add(
+                    "ОШИБКА стенд не поднялся сам: HyperOS запретила запуск в фоне. " +
+                        "Нужны «Автозапуск» и «Запуск в фоне» для AEROCELL (скрипт tools/provision_tablet.ps1)"
+                )
+            } else {
+                UpdateLog.add("стенд на экране")
+            }
+            pending.finish()
+        }, RELAUNCH_CHECK_MS)
     }
 
     companion object {
         private const val TAG = "AerocellKiosk"
+        private const val RELAUNCH_CHECK_MS = 6_000L
 
         fun statusName(status: Int): String = when (status) {
             PackageInstaller.STATUS_SUCCESS -> "успех"

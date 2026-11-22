@@ -30,6 +30,13 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        /** Экран стенда сейчас на переднем плане: по нему журнал проверяет перезапуск после обновления. */
+        @Volatile
+        var standOnScreen: Boolean = false
+            private set
+    }
+
     private val viewModel: StandViewModel by viewModels()
     private val kiosk by lazy { KioskController(this) }
 
@@ -171,8 +178,14 @@ class MainActivity : ComponentActivity() {
         return super.dispatchTouchEvent(ev)
     }
 
+    override fun onPause() {
+        super.onPause()
+        standOnScreen = false
+    }
+
     override fun onResume() {
         super.onResume()
+        standOnScreen = true
         hideSystemBars()
         viewModel.onResume()
         val s = viewModel.state.value
