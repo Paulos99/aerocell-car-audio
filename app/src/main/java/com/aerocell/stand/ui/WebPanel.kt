@@ -162,10 +162,13 @@ fun WebPanelOverlay(
         onDispose { destroyAndWipe(webView) }
     }
 
-    // Аппаратная «Назад» (если вдруг доступна): сначала по истории страницы, потом закрыть окно.
-    BackHandler(enabled = true) {
-        if (webView.canGoBack()) webView.goBack() else onClose()
+    // «←» в шапке и аппаратная «Назад» делают одно и то же: шаг назад по сайту,
+    // а с первой страницы закрывают окно в плитку меню. Историю спрашиваем у WebView
+    // в момент нажатия, а не по сохранённому флагу: SPA и #якоря меняют её без загрузки.
+    val goBack: () -> Unit = {
+        if (failed || !stepBack(webView)) onClose()
     }
+    BackHandler(enabled = true) { goBack() }
 
     var modalBounds by remember { mutableStateOf<Rect?>(null) }
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -218,7 +221,7 @@ fun WebPanelOverlay(
             WebHeader(
                 title = panel.title,
                 canGoBack = canGoBack && !failed,
-                onBack = { if (webView.canGoBack()) webView.goBack() },
+                onBack = goBack,
                 onClose = onClose
             )
             Box(Modifier.fillMaxWidth().height(3.dp)) {
@@ -282,14 +285,15 @@ private fun WebHeader(
             modifier = Modifier
                 .size(72.dp)
                 .clip(CircleShape)
-                .clickable(enabled = canGoBack, onClick = onBack)
-                .semantics { contentDescription = "Назад" },
+                // Всегда активна: по истории сайта или закрывает окно.
+                .clickable(onClick = onBack)
+                .semantics { contentDescription = if (canGoBack) "Назад" else "Назад в меню" },
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = null,
-                tint = Color.White.copy(alpha = if (canGoBack) 0.95f else 0.25f),
+                tint = Color.White.copy(alpha = 0.95f),
                 modifier = Modifier.size(30.dp)
             )
         }
@@ -450,6 +454,8 @@ private fun createKioskWebView(
     webView.setDownloadListener { _, _, _, _, _ -> onBlocked() }
 
     webView.webViewClient = object : WebViewClient() {
+        private var firstPageDone = false
+
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url?.toString()
             val scheme = request.url?.scheme?.lowercase()
@@ -468,6 +474,12 @@ private fun createKioskWebView(
 
         override fun onPageFinished(view: WebView, url: String?) {
             onLoading(false)
+            // Первая загрузка: JS-переадресации стартовой ссылки не должны быть шагом «назад»,
+            // иначе стрелка вернёт на адрес, который тут же снова уйдёт вперёд.
+            if (!firstPageDone && url != null && url != "about:blank") {
+                firstPageDone = true
+                view.clearHistory()
+            }
             onHistory(view.canGoBack())
         }
 
@@ -516,6 +528,26 @@ private fun createKioskWebView(
         }
     }
     return webView
+}
+
+/**
+ * Шаг назад по истории WebView. Пропускает записи с тем же адресом, что и текущая страница
+ * (повторная загрузка, переадресация на себя), и about:blank. false — назад идти некуда.
+ */
+private fun stepBack(webView: WebView): Boolean {
+    val list = webView.copyBackForwardList()
+    val current = list.currentIndex
+    if (current <= 0) return false
+    val currentUrl = list.currentItem?.url
+    var target = current - 1
+    while (target >= 0) {
+        val url = list.getItemAtIndex(target)?.url
+        if (url != null && url != "about:blank" && url != currentUrl) break
+        target--
+    }
+    if (target < 0) return false
+    webView.goBackOrForward(target - current)
+    return true
 }
 
 /** Закрыли окно: останавливаем страницу и стираем всё, что сайт успел сохранить. */
