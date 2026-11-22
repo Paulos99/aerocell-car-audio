@@ -43,6 +43,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -177,11 +182,10 @@ fun WebPanelOverlay(
                     onClick = {}
                 )
         )
-        // Внешний бокс без трансформаций: по нему знаем итоговое место окна.
+        // Внешний бокс без трансформаций: по нему знаем итоговое место окна. Окно на весь экран.
         Box(
             modifier = Modifier
-                .fillMaxWidth(0.92f)
-                .fillMaxHeight(0.9f)
+                .fillMaxSize()
                 .onGloballyPositioned { modalBounds = it.boundsInRoot() }
         ) {
         Column(
@@ -203,10 +207,13 @@ fun WebPanelOverlay(
                         scaleY = s
                     }
                     alpha = MenuMotion.contentAlpha(g, speed = 2.5f)
+                    // Пока растёт из плитки, углы скруглены как у плитки; на весь экран — прямые.
+                    // Масштаб по осям разный, поэтому радиус делим на него, чтобы угол выглядел ровно.
+                    val radius = MenuMotion.lerp(MenuTileCorner.toPx(), 0f, g.coerceIn(0f, 1f))
+                    shape = RoundedCornerShape(radius / maxOf(minOf(scaleX, scaleY), 0.05f))
+                    clip = true
                 }
-                .clip(RoundedCornerShape(22.dp))
                 .background(AeroPanel)
-                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(22.dp))
         ) {
             WebHeader(
                 title = panel.title,
@@ -264,6 +271,8 @@ private fun WebHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // Окно на весь экран: шапка не заходит под вырез и системные зоны.
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
             .height(80.dp)
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically

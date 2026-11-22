@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -151,8 +153,8 @@ fun MainMenu(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(top = 18.dp)
-                .height(104.dp)
+                .padding(top = 10.dp)
+                .height(84.dp)
                 .semantics { contentDescription = "aerocell QP" }
                 .pointerInput(Unit) { detectTapGestures(onLongPress = { onLogoLongPress() }) }
         )
@@ -160,8 +162,8 @@ fun MainMenu(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(start = 40.dp, end = 40.dp, top = 140.dp, bottom = 40.dp),
-            horizontalArrangement = Arrangement.spacedBy(20.dp)
+                .padding(start = 28.dp, end = 28.dp, top = 108.dp, bottom = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             PressableTile(
                 onClick = onOpenComparison,
@@ -181,7 +183,7 @@ fun MainMenu(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 PressableTile(
                     onClick = { onOpenWeb(WebTarget.CALCULATOR) },
@@ -193,7 +195,7 @@ fun MainMenu(
                     SmallTileContent(
                         icon = Icons.Filled.Calculate,
                         title = links.calculator.label,
-                        subtitle = "Сколько материала нужно на вашу машину"
+                        subtitle = "Сколько материала нужно вашей машине"
                     )
                 }
                 PressableTile(
@@ -206,7 +208,7 @@ fun MainMenu(
                     SmallTileContent(
                         icon = Icons.Filled.GridView,
                         title = links.catalog.label,
-                        subtitle = "Все материалы STP для шумоизоляции"
+                        subtitle = "Все материалы STP"
                     )
                 }
             }
@@ -261,11 +263,15 @@ private fun PressableTile(
     )
 }
 
+/**
+ * «Сравнение»: сверху текст, под ним отдельная зона под короба, справа внизу кнопка.
+ * Зоны не пересекаются: картинки вписываются в свою область и не лезут под текст.
+ */
 @Composable
 private fun BoxScope.ComparisonTileContent() {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val w = maxWidth
-        val h = maxHeight
+        val compact = maxHeight < 360.dp || maxWidth < 560.dp
+        val pad = if (compact) 24.dp else 32.dp
         // Красное свечение за коробом AEROCELL.
         Box(
             Modifier
@@ -275,95 +281,156 @@ private fun BoxScope.ComparisonTileContent() {
                         Brush.radialGradient(
                             0f to AeroRed.copy(alpha = 0.36f),
                             0.7f to Color.Transparent,
-                            center = Offset(size.width * 0.32f, size.height * 0.58f),
-                            radius = size.width * 0.66f
+                            center = Offset(size.width * 0.3f, size.height * 0.68f),
+                            radius = size.width * 0.6f
                         )
                     )
                 }
         )
-        Image(
-            painter = painterResource(R.drawable.speaker_right),
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .offset(x = w * 0.534f, y = h * 0.435f)
-                .size(w * 0.343f)
-                .graphicsLayer { alpha = 0.55f }
-        )
-        Image(
-            painter = painterResource(R.drawable.speaker_aerocell_genio),
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .offset(x = w * 0.025f, y = h * 0.31f)
-                .size(w * 0.52f)
-        )
-        Column(Modifier.padding(start = 44.dp, top = 36.dp).widthIn(max = 440.dp)) {
+        Column(Modifier.fillMaxSize().padding(pad)) {
             Text(
                 text = "ПОСЛУШАЙТЕ РАЗНИЦУ",
                 color = Color.White.copy(alpha = 0.6f),
-                fontSize = 13.sp,
-                letterSpacing = 2.4.sp
+                fontSize = 12.sp,
+                letterSpacing = 2.sp,
+                maxLines = 1
             )
-            Spacer(Modifier.height(8.dp))
-            Text(text = "Сравнение", color = Color.White, fontSize = 54.sp, fontWeight = FontWeight.ExtraBold)
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Сравнение",
+                color = Color.White,
+                fontSize = if (compact) 36.sp else 44.sp,
+                lineHeight = if (compact) 40.sp else 48.sp,
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1
+            )
+            Spacer(Modifier.height(6.dp))
             Text(
                 text = "Один трек, два короба: с AEROCELL и без обработки",
                 color = Color.White.copy(alpha = 0.75f),
-                fontSize = 19.sp,
-                lineHeight = 26.sp
+                fontSize = if (compact) 15.sp else 17.sp,
+                lineHeight = if (compact) 20.sp else 23.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
-        }
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 36.dp, bottom = 34.dp)
-                .height(64.dp)
-                .clip(RoundedCornerShape(50))
-                .background(AeroRed)
-                .padding(start = 34.dp, end = 28.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("СЛУШАТЬ", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-            Spacer(Modifier.width(12.dp))
-            Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.height(14.dp))
+            // Зона коробов и кнопки: занимает всё, что осталось под текстом.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.speaker_aerocell_genio),
+                        contentDescription = "Короб AEROCELL",
+                        contentScale = ContentScale.Fit,
+                        alignment = Alignment.BottomCenter,
+                        modifier = Modifier
+                            .weight(0.58f)
+                            .fillMaxHeight()
+                    )
+                    Image(
+                        painter = painterResource(R.drawable.speaker_right),
+                        contentDescription = "Короб без обработки",
+                        contentScale = ContentScale.Fit,
+                        alignment = Alignment.BottomCenter,
+                        modifier = Modifier
+                            .weight(0.42f)
+                            .fillMaxHeight(0.72f)
+                            .graphicsLayer { alpha = 0.55f }
+                    )
+                }
+                Spacer(Modifier.width(16.dp))
+                Row(
+                    modifier = Modifier
+                        .height(if (compact) 52.dp else 60.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(AeroRed)
+                        .padding(start = 26.dp, end = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "СЛУШАТЬ",
+                        color = Color.White,
+                        fontSize = if (compact) 16.sp else 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+                }
+            }
         }
     }
 }
 
+/**
+ * Маленькая плитка: значок и стрелка в верхней строке, текст внизу на всю ширину.
+ * Стрелка стоит в своей строке, поэтому текст под неё не заходит.
+ */
 @Composable
 private fun BoxScope.SmallTileContent(icon: ImageVector, title: String, subtitle: String) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 34.dp)) {
-        Box(
-            modifier = Modifier
-                .size(64.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(AeroRed.copy(alpha = 0.12f))
-                .border(1.dp, AeroRedGlow.copy(alpha = 0.45f), RoundedCornerShape(18.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(icon, contentDescription = null, tint = AeroRedGlow, modifier = Modifier.size(36.dp))
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val compact = maxHeight < 200.dp
+        val pad = if (compact) 18.dp else 24.dp
+        Column(Modifier.fillMaxSize().padding(pad)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(if (compact) 44.dp else 52.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(AeroRed.copy(alpha = 0.12f))
+                        .border(1.dp, AeroRedGlow.copy(alpha = 0.45f), RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(icon, contentDescription = null, tint = AeroRedGlow, modifier = Modifier.size(if (compact) 26.dp else 30.dp))
+                }
+                Spacer(Modifier.weight(1f))
+                Box(
+                    modifier = Modifier
+                        .size(if (compact) 40.dp else 44.dp)
+                        .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+                        .semantics { contentDescription = "Открыть" },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f).heightIn(min = 8.dp))
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = if (compact) 22.sp else 26.sp,
+                lineHeight = if (compact) 26.sp else 30.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = subtitle,
+                color = Color.White.copy(alpha = 0.75f),
+                fontSize = if (compact) 14.sp else 15.sp,
+                lineHeight = if (compact) 18.sp else 20.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
         }
-        Spacer(Modifier.height(26.dp))
-        Text(text = title, color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        Spacer(Modifier.height(8.dp))
-        Text(text = subtitle, color = Color.White.copy(alpha = 0.75f), fontSize = 17.sp, lineHeight = 23.sp)
-    }
-    Box(
-        modifier = Modifier
-            .align(Alignment.BottomEnd)
-            .padding(end = 28.dp, bottom = 28.dp)
-            .size(52.dp)
-            .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            Icons.AutoMirrored.Filled.ArrowForward,
-            contentDescription = null,
-            tint = Color.White,
-            modifier = Modifier.size(26.dp)
-        )
     }
 }
 
